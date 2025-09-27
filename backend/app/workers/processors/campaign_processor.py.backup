@@ -1,0 +1,484 @@
+# app/workers/processors/campaign_processor.py
+"""FIXED campaign processor with proper error handling."""
+
+import asyncio
+import uuid
+import sys
+from datetime import datetime
+from typing import Optional, Dict, Any, List
+
+from app.core.database import SessionLocal
+from app.models.campaign import Campaign, CampaignStatus
+from app.models.submission import Submission, SubmissionStatus
+from app.workers.automation import AutomationController
+from app.workers.handlers.database_handler import (
+    mark_submission_processing,
+    mark_submission_result,
+    pending_for_campaign,
+    update_campaign_status,
+)
+from app.workers.utils.logger import WorkerLogger
+from app.services.submission_service import SubmissionService
+
+
+class CampaignProcessor:
+    """Processes campaigns by automating form submissions."""
+
+    def __init__(self, campaign_id: str, user_id: Optional[str] = None):
+        """Initialize campaign processor."""
+        # Validate and store campaign ID
+        try:
+            self.campaign_uuid = uuid.UUID(campaign_id)
+            self.campaign_id = str(self.campaign_uuid)
+        except ValueError as e:
+            raise ValueError(f"Invalid campaign_id format: {e}")
+
+        self.user_id = user_id
+        self.db = SessionLocal()
+        self.logger = WorkerLogger(user_id=user_id, campaign_id=campaign_id)
+
+        # Initialize automation controller
+        self.automation = AutomationController(user_id=user_id, campaign_id=campaign_id)
+
+        # Statistics tracking
+        self.stats = {
+            "total": 0,
+            "processed": 0,
+            "successful": 0,
+            "failed": 0,
+            "form_submissions": 0,
+            "email_extractions": 0,
+            "no_contact": 0,
+            "start_time": None,
+            "end_time": None,
+            "errors": [],
+        }
+
+    async def run(self):
+        """FIXED: Main campaign processing loop with better error handling."""
+        self.stats["start_time"] = datetime.utcnow()
+        self.logger.info(f"Starting campaign processing: {self.campaign_id[:8]}")
+
+        try:
+            # Get campaign from database
+            campaign = await self._get_campaign()
+            if not campaign:
+                error_msg = f"Campaign {self.campaign_id} not found"
+                self.logger.error(error_msg)
+                self._update_campaign_status(
+                    CampaignStatus.FAILED, error_message=error_msg
+                )
+                return  # Don't raise, just return
+
+            # Update campaign status to processing
+            self._update_campaign_status(CampaignStatus.PROCESSING)
+            self.logger.info("Campaign status updated to PROCESSING")
+
+            # CRITICAL FIX: Better automation startup with error handling
+            try:
+                self.logger.info("Starting automation system...")
+                await self.automation.start()
+                self.logger.info("✓ Automation system started successfully")
+            except Exception as e:
+                error_msg = f"Failed to start automation system: {str(e)}"
+                self.logger.error(error_msg)
+                self._update_campaign_status(
+                    CampaignStatus.FAILED, error_message=error_msg
+                )
+                return  # FIXED: Don't raise, just return
+
+            # Get user profile data for form filling
+            try:
+                self.logger.info("Loading user profile data...")
+                user_data = await self._get_user_profile_data(campaign.user_id)
+                self.logger.info(
+                    f"✓ Loaded user profile for: {user_data.get('email', 'unknown')}"
+                )
+            except Exception as e:
+                error_msg = f"Failed to load user profile: {str(e)}"
+                self.logger.error(error_msg)
+                # Try with fallback data
+                user_data = {
+                    "email": "contact@example.com",
+                    "name": "Business Contact",
+                    "message": "I am interested in learning more about your services.",
+                }
+                self.logger.info("Using fallback user data")
+
+            # Get pending submissions
+            submissions = await self._get_pending_submissions()
+            self.stats["total"] = len(submissions)
+
+            if not submissions:
+                self.logger.info("No pending submissions found")
+                self._update_campaign_status(
+                    CampaignStatus.COMPLETED,
+                    completed_at=datetime.utcnow(),
+                    error_message="No pending submissions to process",
+                )
+                return
+
+            self.logger.info(f"Found {len(submissions)} pending submissions")
+
+            # Process each submission with individual error handling
+            for i, submission in enumerate(submissions, 1):
+                try:
+                    # Check if campaign should be stopped
+                    current_campaign = await self._get_campaign()
+                    if (
+                        current_campaign
+                        and current_campaign.status == CampaignStatus.PAUSED
+                    ):
+                        self.logger.info("Campaign was paused, stopping processing")
+                        break
+
+                    self.logger.info(
+                        f"Processing submission {i}/{len(submissions)}: {submission.url}"
+                    )
+
+                    await self._process_submission(
+                        submission, user_data, i, len(submissions)
+                    )
+
+                    # Rate limiting between submissions
+                    if i < len(submissions):
+                        await asyncio.sleep(2)
+
+                except Exception as e:
+                    self.logger.error(f"Error processing submission {i}: {e}")
+                    self.stats["errors"].append(
+                        {"submission_id": str(submission.id), "error": str(e)}
+                    )
+
+                    # Mark this specific submission as failed
+                    try:
+                        mark_submission_result(
+                            self.db,
+                            submission.id,
+                            success=False,
+                            error_message=str(e)[:500],
+                        )
+                        self.stats["failed"] += 1
+                    except Exception as mark_error:
+                        self.logger.error(
+                            f"Failed to mark submission as failed: {mark_error}"
+                        )
+
+                    continue  # Continue with next submission
+
+            # Complete campaign
+            await self._complete_campaign()
+
+        except Exception as e:
+            error_msg = f"Campaign processing failed: {str(e)}"
+            self.logger.error(error_msg)
+
+            # CRITICAL FIX: Always update campaign status to failed on error
+            try:
+                self._update_campaign_status(
+                    CampaignStatus.FAILED,
+                    error_message=error_msg[:500],
+                    completed_at=datetime.utcnow(),
+                )
+            except Exception as status_error:
+                self.logger.error(
+                    f"Failed to update campaign status to failed: {status_error}"
+                )
+
+            # FIXED: Don't re-raise the exception, let it complete gracefully
+
+        finally:
+            # Cleanup
+            self.stats["end_time"] = datetime.utcnow()
+            await self._cleanup()
+            self._log_final_statistics()
+
+    async def _process_submission(
+        self, submission: Submission, user_data: Dict[str, Any], index: int, total: int
+    ):
+        """Process individual submission."""
+        try:
+            self.logger.info(f"Processing {index}/{total}: {submission.url}")
+
+            # Mark as processing in database
+            mark_submission_processing(self.db, submission.id)
+
+            # Process with automation
+            result = await self.automation.process_website(submission.url, user_data)
+
+            # Update statistics based on result
+            self._update_statistics(result)
+
+            # Extract details from result
+            success = result.get("success", False)
+            method = result.get("method")
+            error_message = result.get("error")
+            details = result.get("details", {})
+
+            # Get email if extracted
+            email_extracted = None
+            if method == "email_extraction":
+                emails = details.get("emails", [])
+                email_extracted = emails[0] if emails else None
+
+            # Update submission in database
+            mark_submission_result(
+                self.db,
+                submission.id,
+                success=success,
+                method=method,
+                error_message=error_message,
+                email_extracted=email_extracted,
+            )
+
+            # Log result
+            if success:
+                self.logger.info(
+                    f"✅ Submission {index}/{total} successful via {method}"
+                )
+            else:
+                self.logger.warning(
+                    f"❌ Submission {index}/{total} failed: {error_message}"
+                )
+
+            # Update processed count
+            self.stats["processed"] += 1
+
+            # Update campaign progress periodically
+            if index % 5 == 0:  # Every 5 submissions
+                self._update_campaign_progress()
+
+        except Exception as e:
+            self.logger.error(f"Submission processing error: {e}")
+            self.stats["failed"] += 1
+
+            # Mark submission as failed
+            mark_submission_result(
+                self.db, submission.id, success=False, error_message=str(e)[:500]
+            )
+
+    async def _get_campaign(self) -> Optional[Campaign]:
+        """Get campaign from database."""
+        try:
+            return (
+                self.db.query(Campaign)
+                .filter(Campaign.id == self.campaign_uuid)
+                .first()
+            )
+        except Exception as e:
+            self.logger.error(f"Error fetching campaign: {e}")
+            return None
+
+    async def _get_user_profile_data(self, user_id: uuid.UUID) -> Dict[str, Any]:
+        """Get user profile data for form filling."""
+        try:
+            # Try intelligent service first
+            from app.services.user_data_service import IntelligentUserDataService
+
+            data_service = IntelligentUserDataService(
+                db=self.db, user_id=str(user_id), campaign_id=self.campaign_id
+            )
+            profile_data = data_service.get_form_data()
+            return profile_data
+        except Exception as e:
+            self.logger.warning(f"Intelligent service failed: {e}, trying fallback")
+            try:
+                # Fallback to basic service
+                service = SubmissionService(self.db)
+                return service.get_user_profile_data(user_id)
+            except Exception as e2:
+                self.logger.warning(f"Basic service failed: {e2}, using minimal data")
+                # Last resort: return minimal data
+                return {
+                    "email": "contact@example.com",
+                    "name": "Business Contact",
+                    "company": "Business Inc.",
+                    "message": "I am interested in learning more about your services.",
+                    "subject": "Business Inquiry",
+                }
+
+    async def _get_pending_submissions(self) -> List[Submission]:
+        """Get pending submissions for the campaign."""
+        try:
+            return pending_for_campaign(self.db, self.campaign_uuid)
+        except Exception as e:
+            self.logger.error(f"Error fetching submissions: {e}")
+            return []
+
+    def _update_statistics(self, result: Dict[str, Any]):
+        """Update statistics based on processing result."""
+        if result.get("success"):
+            self.stats["successful"] += 1
+            method = result.get("method")
+            if method == "form_submission":
+                self.stats["form_submissions"] += 1
+            elif method == "email_extraction":
+                self.stats["email_extractions"] += 1
+        else:
+            self.stats["failed"] += 1
+            if "no contact method" in result.get("error", "").lower():
+                self.stats["no_contact"] += 1
+
+    def _update_campaign_status(self, status: CampaignStatus, **additional_fields):
+        """Update campaign status in database."""
+        try:
+            update_campaign_status(
+                self.db, self.campaign_uuid, status, **additional_fields
+            )
+            self.logger.info(f"Campaign status updated to: {status}")
+        except Exception as e:
+            self.logger.error(f"Error updating campaign status: {e}")
+
+    def _update_campaign_progress(self):
+        """Update campaign progress in database."""
+        try:
+            campaign = (
+                self.db.query(Campaign)
+                .filter(Campaign.id == self.campaign_uuid)
+                .first()
+            )
+            if campaign:
+                campaign.processed = self.stats["processed"]
+                campaign.successful = self.stats["successful"]
+                campaign.failed = self.stats["failed"]
+                campaign.updated_at = datetime.utcnow()
+                self.db.commit()
+                self.logger.debug(
+                    f"Updated progress: {self.stats['processed']}/{self.stats['total']}"
+                )
+        except Exception as e:
+            self.logger.error(f"Error updating campaign progress: {e}")
+            self.db.rollback()
+
+    async def _complete_campaign(self):
+        """Complete the campaign and update final statistics."""
+        self.logger.info("Completing campaign processing")
+
+        # Calculate duration
+        duration = None
+        if self.stats["start_time"] and self.stats.get("end_time"):
+            duration = (
+                self.stats["end_time"] - self.stats["start_time"]
+            ).total_seconds()
+
+        # Update campaign with final statistics
+        self._update_campaign_status(
+            CampaignStatus.COMPLETED,
+            completed_at=datetime.utcnow(),
+            total_urls=self.stats["total"],
+            processed=self.stats["processed"],
+            successful=self.stats["successful"],
+            submitted_count=self.stats["form_submissions"],
+            email_fallback=self.stats["email_extractions"],
+            failed_count=self.stats["failed"],
+            no_form=self.stats["no_contact"],
+            processing_duration=duration,
+        )
+
+        self.logger.info(
+            f"Campaign completed: {self.stats['successful']}/{self.stats['total']} successful"
+        )
+
+    async def _cleanup(self):
+        """Cleanup resources."""
+        try:
+            await self.automation.stop()
+            self.logger.info("Automation stopped")
+        except Exception as e:
+            self.logger.error(f"Error stopping automation: {e}")
+
+        try:
+            self.db.close()
+            self.logger.info("Database connection closed")
+        except Exception as e:
+            self.logger.error(f"Error closing database: {e}")
+
+    def _log_final_statistics(self):
+        """Log final campaign statistics."""
+        duration = None
+        if self.stats["start_time"] and self.stats["end_time"]:
+            duration = (
+                self.stats["end_time"] - self.stats["start_time"]
+            ).total_seconds()
+
+        self.logger.info("=" * 50)
+        self.logger.info("CAMPAIGN PROCESSING COMPLETE")
+        self.logger.info("=" * 50)
+        self.logger.info(f"Campaign ID: {self.campaign_id[:8]}")
+        self.logger.info(f"Total URLs: {self.stats['total']}")
+        self.logger.info(f"Processed: {self.stats['processed']}")
+        self.logger.info(f"Successful: {self.stats['successful']}")
+        self.logger.info(f"Failed: {self.stats['failed']}")
+        self.logger.info(f"Form Submissions: {self.stats['form_submissions']}")
+        self.logger.info(f"Email Extractions: {self.stats['email_extractions']}")
+        self.logger.info(f"No Contact Found: {self.stats['no_contact']}")
+        if duration:
+            self.logger.info(f"Duration: {duration:.2f} seconds")
+        self.logger.info("=" * 50)
+
+
+def process_campaign_sync(campaign_id: str, user_id: Optional[str] = None):
+    """FIXED: Synchronous wrapper with better error handling."""
+    # Set event loop policy for Windows
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+    # Create new event loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    try:
+        # Create processor and run
+        processor = CampaignProcessor(campaign_id, user_id)
+        loop.run_until_complete(processor.run())
+        print(f"✅ Campaign {campaign_id[:8]} processing completed successfully")
+
+    except Exception as e:
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.error(f"Campaign processing failed: {e}")
+
+        # Try to mark campaign as failed in database
+        try:
+            from app.core.database import SessionLocal
+            from app.models.campaign import Campaign, CampaignStatus
+
+            db = SessionLocal()
+            try:
+                campaign = (
+                    db.query(Campaign)
+                    .filter(Campaign.id == uuid.UUID(campaign_id))
+                    .first()
+                )
+                if campaign:
+                    campaign.status = CampaignStatus.FAILED
+                    campaign.error_message = f"Processing error: {str(e)}"
+                    campaign.completed_at = datetime.utcnow()
+                    campaign.updated_at = datetime.utcnow()
+                    db.commit()
+                    print(f"❌ Campaign {campaign_id[:8]} marked as failed")
+            finally:
+                db.close()
+        except Exception as db_error:
+            print(f"Failed to update campaign status: {db_error}")
+
+    finally:
+        # Cleanup
+        try:
+            pending = asyncio.all_tasks(loop)
+            for task in pending:
+                task.cancel()
+            if pending:
+                loop.run_until_complete(
+                    asyncio.gather(*pending, return_exceptions=True)
+                )
+            loop.close()
+        except:
+            pass
+
+
+async def process_campaign_async(campaign_id: str, user_id: Optional[str] = None):
+    """Async entry point for campaign processing."""
+    processor = CampaignProcessor(campaign_id, user_id)
+    await processor.run()

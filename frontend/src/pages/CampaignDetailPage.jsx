@@ -1,122 +1,255 @@
-// src/pages/CampaignDetailPage.jsx
-import React, { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+// src/pages/CampaignDetailPage.jsx - Fixed Import Version
+import React, { useState, useEffect, useMemo } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { 
-  ArrowLeft, Play, CheckCircle, XCircle, Clock, Mail, Globe, 
-  AlertCircle, FileText, TrendingUp, Download, RefreshCw,
-  Activity, Target, BarChart3, Eye, Send, AlertTriangle,
-  Calendar, Hash, Pause, X
-} from "lucide-react";
-import api from "../services/api";
-import toast from "react-hot-toast";
+  ArrowLeft, 
+  Play, 
+  Pause, 
+  Square, 
+  Trash2, 
+  Download, 
+  RefreshCw,
+  Globe,
+  Mail,
+  CheckCircle,
+  XCircle,
+  Clock,
+  AlertTriangle,
+  TrendingUp,
+  BarChart3,
+  Settings,
+  Eye,
+  Copy
+} from 'lucide-react';
+import { toast } from 'react-hot-toast';
 
-const CampaignDetailPage = () => {
+// FIXED: Import only apiService, no separate service objects
+import apiService from '../services/api';
+
+const CampaignDetailPage = ({ showResultsView = false }) => {
   const { campaignId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  
+  // State management
   const [campaign, setCampaign] = useState(null);
-  const [logs, setLogs] = useState([]);
+  const [websites, setWebsites] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
+  const [activity, setActivity] = useState([]);
+  const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('overview');
-  const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState(showResultsView ? 'results' : 'overview');
+  const [websocket, setWebsocket] = useState(null);
 
+  // Pagination states
+  const [websitesPage, setWebsitesPage] = useState(1);
+  const [submissionsPage, setSubmissionsPage] = useState(1);
+  const [activityPage, setActivityPage] = useState(1);
+
+  // Load campaign data
   useEffect(() => {
-    fetchCampaignDetails();
-    
-    // Auto-refresh if campaign is running
-    const interval = setInterval(() => {
-      if (campaign?.status === 'running') {
-        fetchCampaignDetails(true);
+    if (campaignId) {
+      loadCampaignData();
+      connectToWebSocket();
+    }
+
+    return () => {
+      if (websocket) {
+        websocket.close();
       }
-    }, 3000); // Refresh every 3 seconds
+    };
+  }, [campaignId]);
 
-    return () => clearInterval(interval);
-  }, [campaignId, campaign?.status]);
-
-  const fetchCampaignDetails = async (silent = false) => {
+  const loadCampaignData = async () => {
     try {
-      if (!silent) setLoading(true);
-      else setRefreshing(true);
-      
-      const [campaignRes, logsRes] = await Promise.all([
-        api.get(`/campaigns/${campaignId}`),
-        api.get(`/campaigns/${campaignId}/logs?limit=50`)
+      setLoading(true);
+
+      // FIXED: Use apiService methods directly
+      const [campaignRes, websitesRes, submissionsRes, activityRes, analyticsRes] = await Promise.allSettled([
+        apiService.getCampaign(campaignId),
+        apiService.getWebsites(campaignId, { page: 1, limit: 20 }),
+        apiService.getSubmissions(campaignId, { page: 1, limit: 20 }),
+        apiService.getCampaignActivity(campaignId, 50),
+        apiService.getCampaignAnalytics(campaignId, 7)
       ]);
-      
-      setCampaign(campaignRes.data);
-      setLogs(logsRes.data);
+
+      if (campaignRes.status === 'fulfilled') setCampaign(campaignRes.value);
+      if (websitesRes.status === 'fulfilled') setWebsites(websitesRes.value.data || websitesRes.value);
+      if (submissionsRes.status === 'fulfilled') setSubmissions(submissionsRes.value.data || submissionsRes.value);
+      if (activityRes.status === 'fulfilled') setActivity(activityRes.value.data || activityRes.value);
+      if (analyticsRes.status === 'fulfilled') setAnalytics(analyticsRes.value);
+
     } catch (error) {
-      console.error('Error fetching campaign details:', error);
+      console.error('Failed to load campaign data:', error);
       toast.error('Failed to load campaign details');
-      navigate('/dashboard');
     } finally {
       setLoading(false);
-      setRefreshing(false);
+    }
+  };
+
+  const connectToWebSocket = () => {
+    try {
+      // FIXED: Use apiService WebSocket method
+      const ws = apiService.connectWebSocket(
+        (data) => {
+          if (data.type === 'campaign_update' && data.campaign_id === campaignId) {
+            setCampaign(prev => ({ ...prev, ...data.updates }));
+          } else if (data.type === 'submission_update' && data.campaign_id === campaignId) {
+            setSubmissions(prev => prev.map(sub => 
+              sub.id === data.submission_id ? { ...sub, ...data.updates } : sub
+            ));
+          }
+        },
+        (error) => console.error('WebSocket error:', error),
+        () => console.log('WebSocket disconnected')
+      );
+      
+      setWebsocket(ws);
+    } catch (error) {
+      console.error('Failed to connect WebSocket:', error);
+    }
+  };
+
+  // Campaign actions
+  const handleStartCampaign = async () => {
+    try {
+      await apiService.startCampaign(campaignId);
+      toast.success('Campaign started successfully');
+      loadCampaignData();
+    } catch (error) {
+      toast.error('Failed to start campaign');
+    }
+  };
+
+  const handlePauseCampaign = async () => {
+    try {
+      await apiService.pauseCampaign(campaignId);
+      toast.success('Campaign paused successfully');
+      loadCampaignData();
+    } catch (error) {
+      toast.error('Failed to pause campaign');
     }
   };
 
   const handleStopCampaign = async () => {
-    if (!window.confirm('Are you sure you want to stop this campaign?')) return;
-    
     try {
-      await api.post(`/campaigns/${campaignId}/stop`);
-      toast.success('Campaign stopped');
-      fetchCampaignDetails();
+      await apiService.stopCampaign(campaignId);
+      toast.success('Campaign stopped successfully');
+      loadCampaignData();
     } catch (error) {
       toast.error('Failed to stop campaign');
     }
   };
 
-  const handleDownloadReport = async () => {
+  const handleDeleteCampaign = async () => {
+    if (!window.confirm('Are you sure you want to delete this campaign? This action cannot be undone.')) {
+      return;
+    }
+
     try {
-      const response = await api.get(`/campaigns/${campaignId}/export`, {
-        responseType: 'blob'
-      });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `campaign-${campaignId}-report.csv`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      toast.success('Report downloaded');
+      await apiService.deleteCampaign(campaignId);
+      toast.success('Campaign deleted successfully');
+      navigate('/campaigns');
     } catch (error) {
-      toast.error('Failed to download report');
+      toast.error('Failed to delete campaign');
     }
   };
 
+  const handleDuplicateCampaign = async () => {
+    const newName = prompt('Enter a name for the duplicated campaign:', `${campaign?.name} (Copy)`);
+    if (!newName) return;
+
+    try {
+      const newCampaign = await apiService.duplicateCampaign(campaignId, newName);
+      toast.success('Campaign duplicated successfully');
+      navigate(`/campaigns/${newCampaign.id}`);
+    } catch (error) {
+      toast.error('Failed to duplicate campaign');
+    }
+  };
+
+  const handleExportData = async (format = 'csv') => {
+    try {
+      const blob = await apiService.exportCampaignData(campaignId, format);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `campaign-${campaign?.name}-data.${format}`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success(`Data exported as ${format.toUpperCase()}`);
+    } catch (error) {
+      toast.error('Failed to export data');
+    }
+  };
+
+  // Load more data for pagination
+  const loadMoreWebsites = async () => {
+    try {
+      const nextPage = websitesPage + 1;
+      const response = await apiService.getWebsites(campaignId, { page: nextPage, limit: 20 });
+      setWebsites(prev => [...prev, ...(response.data || response)]);
+      setWebsitesPage(nextPage);
+    } catch (error) {
+      console.error('Failed to load more websites:', error);
+    }
+  };
+
+  const loadMoreSubmissions = async () => {
+    try {
+      const nextPage = submissionsPage + 1;
+      const response = await apiService.getSubmissions(campaignId, { page: nextPage, limit: 20 });
+      setSubmissions(prev => [...prev, ...(response.data || response)]);
+      setSubmissionsPage(nextPage);
+    } catch (error) {
+      console.error('Failed to load more submissions:', error);
+    }
+  };
+
+  // Retry failed submission
+  const handleRetrySubmission = async (submissionId) => {
+    try {
+      await apiService.retrySubmission(submissionId);
+      toast.success('Submission queued for retry');
+      loadCampaignData();
+    } catch (error) {
+      toast.error('Failed to retry submission');
+    }
+  };
+
+  // Utility functions
   const getStatusColor = (status) => {
-    switch (status) {
-      case 'running': return 'text-green-600 bg-green-100';
-      case 'completed': return 'text-blue-600 bg-blue-100';
-      case 'failed': return 'text-red-600 bg-red-100';
-      case 'stopped': return 'text-gray-600 bg-gray-100';
-      default: return 'text-gray-600 bg-gray-100';
-    }
+    const colors = {
+      'RUNNING': 'text-green-600 bg-green-100',
+      'COMPLETED': 'text-blue-600 bg-blue-100',
+      'PAUSED': 'text-yellow-600 bg-yellow-100',
+      'FAILED': 'text-red-600 bg-red-100',
+      'DRAFT': 'text-gray-600 bg-gray-100',
+      'QUEUED': 'text-purple-600 bg-purple-100'
+    };
+    return colors[status] || 'text-gray-600 bg-gray-100';
   };
 
-  const getLogIcon = (type) => {
-    switch (type) {
-      case 'success': return <CheckCircle className="w-4 h-4 text-green-600" />;
-      case 'email_fallback': return <Mail className="w-4 h-4 text-blue-600" />;
-      case 'failed': return <XCircle className="w-4 h-4 text-red-600" />;
-      case 'no_form': return <AlertCircle className="w-4 h-4 text-yellow-600" />;
-      default: return <Activity className="w-4 h-4 text-gray-600" />;
-    }
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
-  const formatDuration = (startTime, endTime) => {
-    const start = new Date(startTime);
-    const end = endTime ? new Date(endTime) : new Date();
-    const diff = Math.floor((end - start) / 1000); // seconds
-    
-    const hours = Math.floor(diff / 3600);
-    const minutes = Math.floor((diff % 3600) / 60);
-    const seconds = diff % 60;
-    
-    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
-    if (minutes > 0) return `${minutes}m ${seconds}s`;
-    return `${seconds}s`;
+  const calculateSuccessRate = (successful, total) => {
+    if (!total) return 0;
+    return Math.round((successful / total) * 100);
   };
+
+  // Computed values
+  const canStartCampaign = campaign && ['DRAFT', 'PAUSED', 'STOPPED'].includes(campaign.status);
+  const canPauseCampaign = campaign && ['RUNNING', 'PROCESSING'].includes(campaign.status);
+  const canStopCampaign = campaign && ['RUNNING', 'PROCESSING', 'PAUSED'].includes(campaign.status);
 
   if (loading) {
     return (
@@ -133,416 +266,681 @@ const CampaignDetailPage = () => {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <p className="text-gray-600">Campaign not found</p>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Campaign Not Found</h1>
+          <p className="text-gray-600 mb-6">The campaign you're looking for doesn't exist or has been deleted.</p>
           <button
-            onClick={() => navigate('/dashboard')}
-            className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+            onClick={() => navigate('/campaigns')}
+            className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
           >
-            Back to Dashboard
+            Back to Campaigns
           </button>
         </div>
       </div>
     );
   }
 
-  const successRate = Math.round((campaign.successful / Math.max(campaign.processed, 1)) * 100);
-  const isRunning = campaign.status === 'running';
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between py-6">
             <div className="flex items-center space-x-4">
               <button
-                onClick={() => navigate('/dashboard')}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                onClick={() => navigate('/campaigns')}
+                className="flex items-center text-gray-600 hover:text-gray-900 transition-colors"
               >
-                <ArrowLeft className="w-5 h-5 text-gray-600" />
+                <ArrowLeft className="w-5 h-5 mr-2" />
+                Back to Campaigns
               </button>
+              <div className="h-6 border-l border-gray-300"></div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">
-                  {campaign.name || `Campaign #${campaign.id}`}
-                </h1>
-                <p className="text-gray-600">
-                  {campaign.fileName} • Started {new Date(campaign.startTime).toLocaleString()}
+                <h1 className="text-2xl font-bold text-gray-900">{campaign.name}</h1>
+                <p className="text-sm text-gray-500 mt-1">
+                  Created {formatDate(campaign.created_at)} • ID: {campaign.id.slice(0, 8)}
                 </p>
               </div>
             </div>
             
             <div className="flex items-center space-x-3">
-              {refreshing && (
-                <div className="flex items-center text-sm text-gray-500">
-                  <RefreshCw className="w-4 h-4 animate-spin mr-1" />
-                  Updating...
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(campaign.status)}`}>
+                {campaign.status}
+              </span>
+              
+              <div className="flex items-center space-x-2">
+                {canStartCampaign && (
+                  <button
+                    onClick={handleStartCampaign}
+                    className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  >
+                    <Play className="w-4 h-4 mr-2" />
+                    Start
+                  </button>
+                )}
+                
+                {canPauseCampaign && (
+                  <button
+                    onClick={handlePauseCampaign}
+                    className="flex items-center px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"
+                  >
+                    <Pause className="w-4 h-4 mr-2" />
+                    Pause
+                  </button>
+                )}
+                
+                {canStopCampaign && (
+                  <button
+                    onClick={handleStopCampaign}
+                    className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                  >
+                    <Square className="w-4 h-4 mr-2" />
+                    Stop
+                  </button>
+                )}
+                
+                <button
+                  onClick={() => handleExportData('csv')}
+                  className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Export
+                </button>
+                
+                <div className="relative group">
+                  <button className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+                    <Settings className="w-4 h-4 mr-2" />
+                    Actions
+                  </button>
+                  
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+                    <div className="py-2">
+                      <button
+                        onClick={handleDuplicateCampaign}
+                        className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        <Copy className="w-4 h-4 mr-2" />
+                        Duplicate Campaign
+                      </button>
+                      <button
+                        onClick={() => navigate(`/reports?campaign=${campaignId}`)}
+                        className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        <BarChart3 className="w-4 h-4 mr-2" />
+                        View in Reports
+                      </button>
+                      <hr className="my-1" />
+                      <button
+                        onClick={handleDeleteCampaign}
+                        className="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete Campaign
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              )}
-              
-              {isRunning && (
-                <button
-                  onClick={handleStopCampaign}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center space-x-2"
-                >
-                  <X className="w-4 h-4" />
-                  <span>Stop Campaign</span>
-                </button>
-              )}
-              
-              {campaign.status === 'completed' && (
-                <button
-                  onClick={handleDownloadReport}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center space-x-2"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Download Report</span>
-                </button>
-              )}
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Status Card */}
-        <div className={`rounded-xl shadow-lg border-2 p-6 mb-6 ${
-          isRunning ? 'bg-green-50 border-green-500' : 
-          campaign.status === 'completed' ? 'bg-blue-50 border-blue-500' :
-          'bg-gray-50 border-gray-500'
-        }`}>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-3">
-              <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-                isRunning ? 'bg-green-100' : 
-                campaign.status === 'completed' ? 'bg-blue-100' :
-                'bg-gray-100'
-              }`}>
-                {isRunning ? (
-                  <Play className="w-6 h-6 text-green-600" />
-                ) : campaign.status === 'completed' ? (
-                  <CheckCircle className="w-6 h-6 text-blue-600" />
-                ) : (
-                  <Pause className="w-6 h-6 text-gray-600" />
-                )}
-              </div>
+      {/* Stats Overview */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <div className="bg-white p-6 rounded-lg shadow-sm border">
+            <div className="flex items-center justify-between">
               <div>
-                <div className="flex items-center space-x-2">
-                  <h2 className="text-xl font-bold text-gray-900">
-                    Campaign {campaign.status === 'running' ? 'Running' : 
-                             campaign.status === 'completed' ? 'Completed' : 
-                             'Stopped'}
-                  </h2>
-                  {isRunning && (
-                    <div className="flex items-center space-x-1 text-sm text-green-600">
-                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                      <span>Live</span>
-                    </div>
-                  )}
-                </div>
-                <p className="text-sm text-gray-600">
-                  Duration: {formatDuration(campaign.startTime, campaign.endTime)}
+                <p className="text-sm font-medium text-gray-600">Total Websites</p>
+                <p className="text-3xl font-bold text-gray-900">{campaign.total_websites || 0}</p>
+              </div>
+              <Globe className="w-8 h-8 text-blue-500" />
+            </div>
+            <div className="mt-4">
+              <div className="flex items-center text-sm text-gray-500">
+                <span>Processing: {campaign.processed || 0}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-lg shadow-sm border">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Successful</p>
+                <p className="text-3xl font-bold text-green-600">{campaign.successful || 0}</p>
+              </div>
+              <CheckCircle className="w-8 h-8 text-green-500" />
+            </div>
+            <div className="mt-4">
+              <div className="flex items-center text-sm text-gray-500">
+                <span>Success Rate: {calculateSuccessRate(campaign.successful, campaign.total_websites)}%</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-lg shadow-sm border">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Failed</p>
+                <p className="text-3xl font-bold text-red-600">{campaign.failed || 0}</p>
+              </div>
+              <XCircle className="w-8 h-8 text-red-500" />
+            </div>
+            <div className="mt-4">
+              <div className="flex items-center text-sm text-gray-500">
+                <span>Email Fallback: {campaign.email_fallback || 0}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-lg shadow-sm border">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Duration</p>
+                <p className="text-3xl font-bold text-gray-900">
+                  {campaign.processing_duration 
+                    ? `${Math.round(campaign.processing_duration / 60)}m` 
+                    : '0m'}
                 </p>
               </div>
+              <Clock className="w-8 h-8 text-purple-500" />
             </div>
-            
-            <div className="text-right">
-              <p className="text-3xl font-bold text-gray-900">{successRate}%</p>
-              <p className="text-sm text-gray-600">Success Rate</p>
-            </div>
-          </div>
-
-          {/* Progress Bar */}
-          <div className="mb-4">
-            <div className="flex justify-between text-sm mb-2">
-              <span className="text-gray-700 font-medium">
-                {campaign.processed} of {campaign.totalWebsites} websites processed
-              </span>
-              <span className="font-bold text-gray-900">
-                {Math.round((campaign.processed / campaign.totalWebsites) * 100)}%
-              </span>
-            </div>
-            <div className="w-full bg-white rounded-full h-6 shadow-inner">
-              <div 
-                className={`h-6 rounded-full transition-all duration-500 ${
-                  isRunning ? 'bg-gradient-to-r from-green-500 to-green-600' :
-                  campaign.status === 'completed' ? 'bg-gradient-to-r from-blue-500 to-blue-600' :
-                  'bg-gray-500'
-                }`}
-                style={{ width: `${(campaign.processed / campaign.totalWebsites) * 100}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Stats Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div className="bg-white rounded-lg p-3 text-center">
-              <p className="text-2xl font-bold text-gray-900">{campaign.totalWebsites}</p>
-              <p className="text-xs text-gray-600">Total Sites</p>
-            </div>
-            <div className="bg-white rounded-lg p-3 text-center">
-              <p className="text-2xl font-bold text-green-600">{campaign.successful}</p>
-              <p className="text-xs text-gray-600">Successful</p>
-            </div>
-            <div className="bg-white rounded-lg p-3 text-center">
-              <p className="text-2xl font-bold text-blue-600">{campaign.emailFallback || 0}</p>
-              <p className="text-xs text-gray-600">Email Sent</p>
-            </div>
-            <div className="bg-white rounded-lg p-3 text-center">
-              <p className="text-2xl font-bold text-yellow-600">{campaign.noForm || 0}</p>
-              <p className="text-xs text-gray-600">No Form</p>
-            </div>
-            <div className="bg-white rounded-lg p-3 text-center">
-              <p className="text-2xl font-bold text-red-600">{campaign.failed}</p>
-              <p className="text-xs text-gray-600">Failed</p>
+            <div className="mt-4">
+              <div className="flex items-center text-sm text-gray-500">
+                <span>Started: {formatDate(campaign.started_at)}</span>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="bg-white rounded-xl shadow-lg border overflow-hidden">
-          <div className="border-b">
-            <div className="flex">
-              <button
-                onClick={() => setActiveTab('overview')}
-                className={`px-6 py-3 text-sm font-medium transition-colors ${
-                  activeTab === 'overview' 
-                    ? 'bg-indigo-50 text-indigo-600 border-b-2 border-indigo-600' 
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                Overview
-              </button>
-              <button
-                onClick={() => setActiveTab('logs')}
-                className={`px-6 py-3 text-sm font-medium transition-colors ${
-                  activeTab === 'logs' 
-                    ? 'bg-indigo-50 text-indigo-600 border-b-2 border-indigo-600' 
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                Activity Logs ({logs.length})
-              </button>
-              <button
-                onClick={() => setActiveTab('analytics')}
-                className={`px-6 py-3 text-sm font-medium transition-colors ${
-                  activeTab === 'analytics' 
-                    ? 'bg-indigo-50 text-indigo-600 border-b-2 border-indigo-600' 
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                Analytics
-              </button>
+        {/* Progress Bar */}
+        {campaign.total_websites > 0 && (
+          <div className="bg-white p-6 rounded-lg shadow-sm border mb-8">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Campaign Progress</h3>
+              <span className="text-sm text-gray-500">
+                {campaign.processed || 0} / {campaign.total_websites} websites processed
+              </span>
             </div>
+            
+            <div className="w-full bg-gray-200 rounded-full h-3">
+              <div
+                className="bg-gradient-to-r from-blue-500 to-indigo-600 h-3 rounded-full transition-all duration-500"
+                style={{ 
+                  width: `${Math.min(((campaign.processed || 0) / campaign.total_websites) * 100, 100)}%` 
+                }}
+              ></div>
+            </div>
+            
+            <div className="flex justify-between items-center mt-4">
+              <div className="flex space-x-6">
+                <div className="flex items-center">
+                  <div className="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
+                  <span className="text-sm text-gray-600">Successful ({campaign.successful || 0})</span>
+                </div>
+                <div className="flex items-center">
+                  <div className="w-3 h-3 bg-red-500 rounded-full mr-2"></div>
+                  <span className="text-sm text-gray-600">Failed ({campaign.failed || 0})</span>
+                </div>
+                <div className="flex items-center">
+                  <div className="w-3 h-3 bg-yellow-500 rounded-full mr-2"></div>
+                  <span className="text-sm text-gray-600">Email Fallback ({campaign.email_fallback || 0})</span>
+                </div>
+              </div>
+              
+              <div className="text-sm text-gray-500">
+                {Math.round(((campaign.processed || 0) / campaign.total_websites) * 100)}% Complete
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tabs */}
+        <div className="bg-white rounded-lg shadow-sm border">
+          <div className="border-b border-gray-200">
+            <nav className="flex space-x-8 px-6">
+              {[
+                { id: 'overview', label: 'Overview', icon: Eye },
+                { id: 'websites', label: 'Websites', icon: Globe },
+                { id: 'results', label: 'Submissions', icon: Mail },
+                { id: 'activity', label: 'Activity', icon: Clock },
+                { id: 'settings', label: 'Settings', icon: Settings }
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center py-4 px-1 border-b-2 font-medium text-sm ${
+                    activeTab === tab.id
+                      ? 'border-indigo-500 text-indigo-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  } transition-colors`}
+                >
+                  <tab.icon className="w-4 h-4 mr-2" />
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
           </div>
 
           <div className="p-6">
             {/* Overview Tab */}
             {activeTab === 'overview' && (
               <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Campaign Information</h3>
-                    <dl className="space-y-3">
-                      <div className="flex justify-between">
-                        <dt className="text-sm text-gray-600">Campaign ID</dt>
-                        <dd className="text-sm font-medium text-gray-900">#{campaign.id}</dd>
-                      </div>
-                      <div className="flex justify-between">
-                        <dt className="text-sm text-gray-600">File Name</dt>
-                        <dd className="text-sm font-medium text-gray-900">{campaign.fileName}</dd>
-                      </div>
-                      <div className="flex justify-between">
-                        <dt className="text-sm text-gray-600">Started</dt>
-                        <dd className="text-sm font-medium text-gray-900">
-                          {new Date(campaign.startTime).toLocaleString()}
-                        </dd>
-                      </div>
-                      {campaign.endTime && (
-                        <div className="flex justify-between">
-                          <dt className="text-sm text-gray-600">Ended</dt>
-                          <dd className="text-sm font-medium text-gray-900">
-                            {new Date(campaign.endTime).toLocaleString()}
-                          </dd>
-                        </div>
-                      )}
-                      <div className="flex justify-between">
-                        <dt className="text-sm text-gray-600">Processing Rate</dt>
-                        <dd className="text-sm font-medium text-gray-900">~120 sites/hour</dd>
-                      </div>
-                    </dl>
-                  </div>
-                  
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Performance Metrics</h3>
+                {/* Campaign Details */}
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Campaign Details</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-4">
                       <div>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-gray-600">Form Success</span>
-                          <span className="font-medium text-gray-900">
-                            {Math.round((campaign.successful / Math.max(campaign.processed, 1)) * 100)}%
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div 
-                            className="bg-green-500 h-2 rounded-full"
-                            style={{ width: `${(campaign.successful / Math.max(campaign.processed, 1)) * 100}%` }}
-                          />
-                        </div>
+                        <label className="block text-sm font-medium text-gray-700">Campaign Name</label>
+                        <p className="mt-1 text-sm text-gray-900">{campaign.name || 'Unnamed Campaign'}</p>
                       </div>
-                      
                       <div>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-gray-600">Email Fallback</span>
-                          <span className="font-medium text-gray-900">
-                            {Math.round(((campaign.emailFallback || 0) / Math.max(campaign.processed, 1)) * 100)}%
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div 
-                            className="bg-blue-500 h-2 rounded-full"
-                            style={{ width: `${((campaign.emailFallback || 0) / Math.max(campaign.processed, 1)) * 100}%` }}
-                          />
-                        </div>
+                        <label className="block text-sm font-medium text-gray-700">Status</label>
+                        <span className={`mt-1 inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(campaign.status)}`}>
+                          {campaign.status}
+                        </span>
                       </div>
-                      
                       <div>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-gray-600">Failed</span>
-                          <span className="font-medium text-gray-900">
-                            {Math.round((campaign.failed / Math.max(campaign.processed, 1)) * 100)}%
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div 
-                            className="bg-red-500 h-2 rounded-full"
-                            style={{ width: `${(campaign.failed / Math.max(campaign.processed, 1)) * 100}%` }}
-                          />
-                        </div>
+                        <label className="block text-sm font-medium text-gray-700">File Name</label>
+                        <p className="mt-1 text-sm text-gray-900">{campaign.csv_filename || campaign.file_name || 'N/A'}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Created</label>
+                        <p className="mt-1 text-sm text-gray-900">{formatDate(campaign.created_at)}</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Last Updated</label>
+                        <p className="mt-1 text-sm text-gray-900">{formatDate(campaign.updated_at)}</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">CAPTCHA Enabled</label>
+                        <p className="mt-1 text-sm text-gray-900">
+                          {campaign.use_captcha ? 'Yes' : 'No'}
+                        </p>
                       </div>
                     </div>
                   </div>
                 </div>
 
                 {/* Message Template */}
-                {campaign.messageTemplate && (
+                {campaign.message && (
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Message Template Used</h3>
-                    <div className="bg-gray-50 rounded-lg p-4">
-                      <p className="text-sm text-gray-700 whitespace-pre-wrap">
-                        {campaign.messageTemplate}
-                      </p>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Message Template</h3>
+                    <div className="bg-gray-50 border rounded-lg p-4">
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap">{campaign.message}</p>
                     </div>
                   </div>
                 )}
-              </div>
-            )}
 
-            {/* Logs Tab */}
-            {activeTab === 'logs' && (
-              <div className="space-y-4">
-                {logs.length > 0 ? (
-                  <div className="space-y-2">
-                    {logs.map((log, idx) => (
-                      <div key={idx} className="flex items-start space-x-3 p-3 rounded-lg hover:bg-gray-50 transition-colors">
-                        {getLogIcon(log.type)}
-                        <div className="flex-1">
-                          <p className="text-sm font-medium text-gray-900">
-                            {log.website}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {log.message} • {new Date(log.timestamp).toLocaleTimeString()}
-                          </p>
+                {/* Analytics Summary */}
+                {analytics && (
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Performance Analytics</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-medium text-blue-600">Average Success Rate</p>
+                            <p className="text-2xl font-bold text-blue-700">
+                              {analytics.success_rate ? `${analytics.success_rate}%` : 'N/A'}
+                            </p>
+                          </div>
+                          <TrendingUp className="w-8 h-8 text-blue-500" />
                         </div>
-                        <span className={`inline-flex items-center px-2 py-1 text-xs font-medium rounded-full ${
-                          log.type === 'success' ? 'bg-green-100 text-green-800' :
-                          log.type === 'email_fallback' ? 'bg-blue-100 text-blue-800' :
-                          log.type === 'no_form' ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-red-100 text-red-800'
-                        }`}>
-                          {log.type.replace('_', ' ')}
-                        </span>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-12">
-                    <Activity className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500">No activity logs yet</p>
-                    <p className="text-sm text-gray-400 mt-1">Logs will appear as the campaign processes websites</p>
+                      
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-medium text-green-600">Processing Speed</p>
+                            <p className="text-2xl font-bold text-green-700">
+                              {analytics.processing_speed ? `${analytics.processing_speed}/min` : 'N/A'}
+                            </p>
+                          </div>
+                          <BarChart3 className="w-8 h-8 text-green-500" />
+                        </div>
+                      </div>
+                      
+                      <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-medium text-orange-600">CAPTCHA Encounters</p>
+                            <p className="text-2xl font-bold text-orange-700">
+                              {analytics.captcha_count || 0}
+                            </p>
+                          </div>
+                          <AlertTriangle className="w-8 h-8 text-orange-500" />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
             )}
 
-            {/* Analytics Tab */}
-            {activeTab === 'analytics' && (
-              <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <Target className="w-8 h-8 text-green-600" />
-                      <span className="text-2xl font-bold text-green-700">{successRate}%</span>
-                    </div>
-                    <p className="text-sm font-medium text-green-800">Overall Success Rate</p>
-                    <p className="text-xs text-green-600 mt-1">Above average performance</p>
-                  </div>
-                  
-                  <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <Clock className="w-8 h-8 text-blue-600" />
-                      <span className="text-2xl font-bold text-blue-700">
-                        {Math.round(campaign.processed / (campaign.duration || 1))} /hr
-                      </span>
-                    </div>
-                    <p className="text-sm font-medium text-blue-800">Processing Speed</p>
-                    <p className="text-xs text-blue-600 mt-1">Sites per hour</p>
-                  </div>
-                  
-                  <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <Send className="w-8 h-8 text-purple-600" />
-                      <span className="text-2xl font-bold text-purple-700">
-                        {campaign.successful + (campaign.emailFallback || 0)}
-                      </span>
-                    </div>
-                    <p className="text-sm font-medium text-purple-800">Messages Delivered</p>
-                    <p className="text-xs text-purple-600 mt-1">Total outreach</p>
-                  </div>
+            {/* Websites Tab */}
+            {activeTab === 'websites' && (
+              <div>
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg font-semibold text-gray-900">Websites ({websites.length})</h3>
+                  <button
+                    onClick={loadMoreWebsites}
+                    className="flex items-center px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                  >
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Load More
+                  </button>
                 </div>
 
-                {/* Failure Analysis */}
-                {campaign.failed > 0 && (
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Failure Analysis</h3>
-                    <div className="bg-red-50 rounded-lg p-4">
-                      <div className="space-y-2">
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-700">CAPTCHA Failures</span>
-                          <span className="text-sm font-medium text-gray-900">
-                            {campaign.captchaFailed || 0}
-                          </span>
+                <div className="space-y-4">
+                  {websites.map((website) => (
+                    <div key={website.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-3">
+                            <h4 className="font-medium text-gray-900">{website.domain}</h4>
+                            <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(website.status)}`}>
+                              {website.status}
+                            </span>
+                            {website.form_detected && (
+                              <span className="px-2 py-1 text-xs font-medium text-green-700 bg-green-100 rounded-full">
+                                Form Detected
+                              </span>
+                            )}
+                            {website.has_captcha && (
+                              <span className="px-2 py-1 text-xs font-medium text-orange-700 bg-orange-100 rounded-full">
+                                CAPTCHA
+                              </span>
+                            )}
+                          </div>
+                          
+                          {website.contact_url && (
+                            <a
+                              href={website.contact_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm text-blue-600 hover:text-blue-800 mt-1 block"
+                            >
+                              {website.contact_url}
+                            </a>
+                          )}
+                          
+                          {website.failure_reason && (
+                            <p className="text-sm text-red-600 mt-1">
+                              Error: {website.failure_reason}
+                            </p>
+                          )}
                         </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-700">No Contact Form Found</span>
-                          <span className="text-sm font-medium text-gray-900">
-                            {campaign.noForm || 0}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-700">Website Unreachable</span>
-                          <span className="text-sm font-medium text-gray-900">
-                            {campaign.unreachable || 0}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-700">Other Errors</span>
-                          <span className="text-sm font-medium text-gray-900">
-                            {campaign.failed - (campaign.captchaFailed || 0) - (campaign.noForm || 0) - (campaign.unreachable || 0)}
-                          </span>
+                        
+                        <div className="text-right">
+                          {website.form_field_count && (
+                            <p className="text-sm text-gray-500">
+                              {website.form_field_count} fields
+                            </p>
+                          )}
+                          <p className="text-xs text-gray-400">
+                            {formatDate(website.created_at)}
+                          </p>
                         </div>
                       </div>
                     </div>
+                  ))}
+                  
+                  {websites.length === 0 && (
+                    <div className="text-center py-12">
+                      <Globe className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-gray-900 mb-2">No websites found</h3>
+                      <p className="text-gray-500">
+                        Websites will appear here once the campaign is processed.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Submissions Tab */}
+            {activeTab === 'results' && (
+              <div>
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg font-semibold text-gray-900">Submissions ({submissions.length})</h3>
+                  <button
+                    onClick={loadMoreSubmissions}
+                    className="flex items-center px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                  >
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Load More
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  {submissions.map((submission) => (
+                    <div key={submission.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-3">
+                            <h4 className="font-medium text-gray-900">
+                              {submission.url ? new URL(submission.url).hostname : 'Unknown Website'}
+                            </h4>
+                            <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                              submission.success 
+                                ? 'text-green-700 bg-green-100' 
+                                : submission.status === 'failed'
+                                  ? 'text-red-700 bg-red-100'
+                                  : 'text-yellow-700 bg-yellow-100'
+                            }`}>
+                              {submission.success ? 'Success' : submission.status}
+                            </span>
+                            <span className="px-2 py-1 text-xs font-medium text-blue-700 bg-blue-100 rounded-full">
+                              {submission.contact_method_display || submission.contact_method}
+                            </span>
+                            {submission.captcha_solved && (
+                              <span className="px-2 py-1 text-xs font-medium text-purple-700 bg-purple-100 rounded-full">
+                                CAPTCHA Solved
+                              </span>
+                            )}
+                          </div>
+                          
+                          {submission.error_message && (
+                            <p className="text-sm text-red-600 mt-1">
+                              Error: {submission.error_message}
+                            </p>
+                          )}
+                          
+                          {submission.email_extracted && (
+                            <p className="text-sm text-gray-600 mt-1">
+                              Email found: {submission.email_extracted}
+                            </p>
+                          )}
+                        </div>
+                        
+                        <div className="flex items-center space-x-2">
+                          {submission.retry_count > 0 && (
+                            <span className="text-xs text-gray-500">
+                              Retried {submission.retry_count}x
+                            </span>
+                          )}
+                          
+                          {!submission.success && submission.status === 'failed' && (
+                            <button
+                              onClick={() => handleRetrySubmission(submission.id)}
+                              className="px-3 py-1 text-xs bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200 transition-colors"
+                            >
+                              Retry
+                            </button>
+                          )}
+                          
+                          <div className="text-right text-xs text-gray-400">
+                            {submission.processing_time && (
+                              <p>{submission.processing_time}s</p>
+                            )}
+                            <p>{formatDate(submission.submitted_at || submission.created_at)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  
+                  {submissions.length === 0 && (
+                    <div className="text-center py-12">
+                      <Mail className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-gray-900 mb-2">No submissions yet</h3>
+                      <p className="text-gray-500">
+                        Submissions will appear here once the campaign is running.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Activity Tab */}
+            {activeTab === 'activity' && (
+              <div>
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg font-semibold text-gray-900">Activity Log ({activity.length})</h3>
+                  <button
+                    onClick={loadCampaignData}
+                    className="flex items-center px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                  >
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Refresh
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  {activity.map((log, index) => (
+                    <div key={index} className="flex items-start space-x-4 py-3 border-b border-gray-100 last:border-b-0">
+                      <div className="flex-shrink-0">
+                        <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
+                          <Clock className="w-4 h-4 text-gray-600" />
+                        </div>
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-gray-900">{log.action || log.message}</p>
+                        {log.details && (
+                          <p className="text-sm text-gray-600 mt-1">{log.details}</p>
+                        )}
+                        <p className="text-xs text-gray-400 mt-1">
+                          {formatDate(log.timestamp || log.created_at)}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                  
+                  {activity.length === 0 && (
+                    <div className="text-center py-12">
+                      <Clock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-gray-900 mb-2">No activity yet</h3>
+                      <p className="text-gray-500">
+                        Activity logs will appear here as the campaign progresses.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Settings Tab */}
+            {activeTab === 'settings' && (
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-6">Campaign Settings</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="space-y-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Campaign Name
+                      </label>
+                      <input
+                        type="text"
+                        value={campaign.name || ''}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        readOnly
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Status
+                      </label>
+                      <span className={`px-3 py-2 text-sm font-medium rounded-lg ${getStatusColor(campaign.status)}`}>
+                        {campaign.status}
+                      </span>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        CAPTCHA Enabled
+                      </label>
+                      <div className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={campaign.use_captcha || false}
+                          className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                          readOnly
+                        />
+                        <label className="ml-2 text-sm text-gray-900">
+                          Use CAPTCHA solving service
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Proxy Configuration
+                      </label>
+                      <input
+                        type="text"
+                        value={campaign.proxy || ''}
+                        placeholder="No proxy configured"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        readOnly
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        CSV File
+                      </label>
+                      <input
+                        type="text"
+                        value={campaign.csv_filename || campaign.file_name || ''}
+                        placeholder="No file uploaded"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        readOnly
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Created
+                      </label>
+                      <input
+                        type="text"
+                        value={formatDate(campaign.created_at)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50"
+                        readOnly
+                      />
+                    </div>
+                  </div>
+                </div>
+                
+                {campaign.message && (
+                  <div className="mt-8">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Message Template
+                    </label>
+                    <textarea
+                      value={campaign.message}
+                      rows={8}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      readOnly
+                    />
                   </div>
                 )}
               </div>

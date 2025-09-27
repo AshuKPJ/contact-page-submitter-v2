@@ -1,0 +1,219 @@
+# app/workers/processors/subprocess_runner.py
+"""Windows-compatible subprocess runner for campaign processing."""
+
+import sys
+import asyncio
+import logging
+import threading
+import subprocess
+import traceback
+from typing import Optional
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+
+def run_campaign_in_subprocess(campaign_id: str, user_id: str) -> threading.Thread:
+    """
+    Run campaign processing in a subprocess for Windows compatibility.
+    Uses threading to avoid blocking the main event loop.
+    """
+
+    def run_subprocess():
+        try:
+            # Prepare the Python command to run in subprocess
+            python_path = sys.executable
+
+            # Create a simple script to run in the subprocess
+            script = f"""
+import sys
+import asyncio
+import logging
+
+# Add the project root to path
+sys.path.insert(0, '{sys.path[0]}')
+
+from app.workers.processors.campaign_processor import process_campaign_sync
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    campaign_id = "{campaign_id}"
+    user_id = "{user_id}"
+    
+    try:
+        # For Windows, use ProactorEventLoop
+        if sys.platform == 'win32':
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        
+        # Run the campaign processing
+        process_campaign_sync(campaign_id, user_id)
+    except Exception as e:
+        logging.error(f"Subprocess error: {{e}}")
+        import traceback
+        traceback.print_exc()
+"""
+
+            # Run the script in a subprocess
+            result = subprocess.run(
+                [python_path, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=3600,  # 1 hour timeout
+            )
+
+            if result.returncode != 0:
+                logger.error(f"Subprocess failed with return code {result.returncode}")
+                logger.error(f"STDOUT: {result.stdout}")
+                logger.error(f"STDERR: {result.stderr}")
+            else:
+                logger.info(
+                    f"Subprocess completed successfully for campaign {campaign_id}"
+                )
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Subprocess timeout for campaign {campaign_id}")
+        except Exception as e:
+            logger.error(f"Error running subprocess for campaign {campaign_id}: {e}")
+            traceback.print_exc()
+
+    # Create and start the thread
+    thread = threading.Thread(
+        target=run_subprocess,
+        name=f"campaign-subprocess-{campaign_id[:8]}",
+        daemon=True,
+    )
+    thread.start()
+
+    return thread
+
+
+def run_campaign_direct(campaign_id: str, user_id: str):
+    """
+    Run campaign processing directly in a thread without subprocess.
+    Fallback method when subprocess approach fails.
+    """
+    try:
+        # Set up event loop for Windows
+        if sys.platform == "win32":
+            # Create a new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            # Use ProactorEventLoop on Windows
+            if hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
+                asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        else:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        try:
+            # Import and run the campaign processor
+            from app.workers.processors.campaign_processor import process_campaign_sync
+
+            # Run the synchronous version
+            process_campaign_sync(campaign_id, user_id)
+
+        finally:
+            # Clean up the event loop
+            try:
+                loop.close()
+            except:
+                pass
+
+    except Exception as e:
+        logger.error(f"Error in direct campaign execution for {campaign_id}: {e}")
+        traceback.print_exc()
+
+        # Try to mark campaign as failed in database
+        try:
+            from app.core.database import SessionLocal
+            from app.models.campaign import Campaign, CampaignStatus
+            import uuid
+
+            db = SessionLocal()
+            try:
+                campaign = (
+                    db.query(Campaign)
+                    .filter(Campaign.id == uuid.UUID(campaign_id))
+                    .first()
+                )
+
+                if campaign:
+                    campaign.status = CampaignStatus.FAILED
+                    campaign.error_message = f"Processing error: {str(e)}"
+                    campaign.completed_at = datetime.utcnow()
+                    campaign.updated_at = datetime.utcnow()
+                    db.commit()
+
+            finally:
+                db.close()
+
+        except Exception as db_error:
+            logger.error(f"Failed to update campaign status: {db_error}")
+
+
+def run_campaign_async_wrapper(campaign_id: str, user_id: str):
+    """
+    Wrapper to run async campaign processing in a sync context.
+    Creates its own event loop to avoid conflicts.
+    """
+    try:
+        # Create a new event loop for this thread
+        if sys.platform == "win32":
+            # Use ProactorEventLoop on Windows
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            if hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
+                asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        else:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        try:
+            # Import and run the async processor
+            from app.workers.processors.campaign_processor import process_campaign_async
+
+            # Run the async function
+            loop.run_until_complete(process_campaign_async(campaign_id, user_id))
+
+        finally:
+            # Clean up
+            try:
+                loop.close()
+            except:
+                pass
+
+    except Exception as e:
+        logger.error(f"Error in async wrapper for campaign {campaign_id}: {e}")
+        traceback.print_exc()
+
+
+# Convenience function for testing
+def test_subprocess_runner():
+    """Test function to verify subprocess runner works."""
+    import uuid
+
+    test_campaign_id = str(uuid.uuid4())
+    test_user_id = str(uuid.uuid4())
+
+    logger.info(f"Testing subprocess runner with campaign {test_campaign_id}")
+
+    thread = run_campaign_in_subprocess(test_campaign_id, test_user_id)
+
+    # Wait a bit to see if it starts
+    import time
+
+    time.sleep(2)
+
+    if thread.is_alive():
+        logger.info("Subprocess runner test: Thread is running")
+    else:
+        logger.warning("Subprocess runner test: Thread finished or failed to start")
+
+    return thread
+
+
+# if __name__ == "__main__":
+#     # Test the subprocess runner
+#     logging.basicConfig(level=logging.INFO)
+#     test_subprocess_runner()

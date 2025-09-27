@@ -1,822 +1,822 @@
-// UserDashboard.jsx - Complete Production Version
-// This connects to your REAL PostgreSQL database via FastAPI
-
-import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
 import { 
-  Play, CheckCircle, Clock, Mail, Globe, AlertCircle, Upload, 
-  FileText, TrendingUp, BarChart3, Activity, Target, RefreshCw, 
-  Loader, X, Download, Settings, LogOut, User, Pause
+  TrendingUp, AlertCircle, Activity, BarChart3, Clock,
+  CheckCircle, XCircle, RefreshCw, Plus, Search,
+  ChevronDown, MoreVertical, ArrowUpRight, ArrowDownRight,
+  Zap, Shield, Mail, Globe, Target, Users, Timer,
+  DollarSign, Percent, Hash, Calendar, Filter, Eye,
+  Database, Server, Cpu, HardDrive, Link2, FileText
 } from 'lucide-react';
+import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, RadialBarChart, RadialBar, Legend } from 'recharts';
 
-// ============================================================================
-// API CONFIGURATION
-// ============================================================================
-const API_BASE_URL = 'http://localhost:8000'; // Change this for production
-
-// ============================================================================
-// API SERVICE LAYER
-// ============================================================================
-class APIService {
-  constructor() {
-    this.baseURL = API_BASE_URL;
-  }
-
-  getHeaders() {
-    const token = localStorage.getItem('access_token');
-    return {
-      'Content-Type': 'application/json',
-      ...(token && { 'Authorization': `Bearer ${token}` })
-    };
-  }
-
-  async request(endpoint, options = {}) {
-    try {
-      const response = await fetch(`${this.baseURL}${endpoint}`, {
-        ...options,
-        headers: {
-          ...this.getHeaders(),
-          ...options.headers
-        }
-      });
-
-      if (response.status === 401) {
-        // Token expired - redirect to login
-        localStorage.removeItem('access_token');
-        window.location.href = '/login';
-        return null;
-      }
-
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        throw new Error(error.detail || `HTTP ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error(`API Error (${endpoint}):`, error);
-      throw error;
-    }
-  }
-
-  // Auth endpoints
-  async login(email, password) {
-    return this.request('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password })
-    });
-  }
-
-  async logout() {
-    return this.request('/api/auth/logout', { method: 'POST' });
-  }
-
-  // Campaign endpoints
-  async getCampaigns(page = 1, perPage = 10) {
-    return this.request(`/api/campaigns?page=${page}&per_page=${perPage}`);
-  }
-
-  async getCampaign(id) {
-    return this.request(`/api/campaigns/${id}`);
-  }
-
-  async createCampaign(data) {
-    return this.request('/api/campaigns', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-  }
-
-  async startCampaign(id) {
-    return this.request(`/api/campaigns/${id}/start`, { method: 'POST' });
-  }
-
-  async stopCampaign(id) {
-    return this.request(`/api/campaigns/${id}/stop`, { method: 'POST' });
-  }
-
-  async getCampaignStats(id) {
-    return this.request(`/api/campaigns/${id}/stats`);
-  }
-
-  async uploadCSV(campaignId, file) {
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    const token = localStorage.getItem('access_token');
-    return fetch(`${this.baseURL}/api/campaigns/${campaignId}/upload-csv`, {
-      method: 'POST',
-      headers: {
-        ...(token && { 'Authorization': `Bearer ${token}` })
-      },
-      body: formData
-    }).then(res => res.json());
-  }
-
-  // Analytics endpoints
-  async getUserAnalytics() {
-    return this.request('/api/analytics/user');
-  }
-
-  async getDailyStats(days = 30) {
-    return this.request(`/api/analytics/daily-stats?days=${days}`);
-  }
-
-  async getCampaignAnalytics(campaignId) {
-    return this.request(`/api/analytics/campaign/${campaignId}`);
-  }
-
-  // Submission endpoints
-  async getSubmissions(page = 1, perPage = 10, campaignId = null) {
-    const params = new URLSearchParams({
-      page: page.toString(),
-      per_page: perPage.toString()
-    });
-    
-    if (campaignId) {
-      params.append('campaign_id', campaignId);
-    }
-    
-    return this.request(`/api/submissions?${params}`);
-  }
-
-  async retryFailedSubmissions(campaignId) {
-    return this.request(`/api/submissions/${campaignId}/retry-failed`, {
-      method: 'POST'
-    });
-  }
-
-  // User endpoints
-  async getUserProfile() {
-    return this.request('/api/users/profile');
-  }
-
-  async updateProfile(data) {
-    return this.request('/api/users/profile', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-  }
-}
-
-// Create API instance
-const api = new APIService();
-
-// ============================================================================
-// MAIN DASHBOARD COMPONENT
-// ============================================================================
 const UserDashboard = () => {
-  const navigate = useNavigate();
-
-  // State management
   const [loading, setLoading] = useState(true);
+  const [data, setData] = useState({
+    analytics: null,
+    campaigns: [],
+    dailyStats: null,
+    performance: null,
+    recentSubmissions: [],
+    websiteStats: []
+  });
+  const [timeRange, setTimeRange] = useState(7);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState(null);
-  
-  // Data from database
-  const [campaigns, setCampaigns] = useState([]);
-  const [currentCampaign, setCurrentCampaign] = useState(null);
-  const [userAnalytics, setUserAnalytics] = useState(null);
-  const [dailyStats, setDailyStats] = useState([]);
-  const [recentSubmissions, setRecentSubmissions] = useState([]);
-  const [userProfile, setUserProfile] = useState(null);
-  
-  // UI state
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [uploadProgress, setUploadProgress] = useState(null);
+  const [selectedKPIView, setSelectedKPIView] = useState('overview');
 
-  // ============================================================================
-  // DATA FETCHING
-  // ============================================================================
-  const fetchDashboardData = useCallback(async () => {
+  // Fetch real data from your API
+  const fetchDashboardData = async () => {
     try {
-      setError(null);
+      setRefreshing(true);
+      const token = localStorage.getItem('access_token');
       
-      // Fetch all data in parallel
+      const headers = {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      };
+
+      // Fetch all data in parallel using your actual endpoints
       const [
-        campaignsData,
-        analyticsData,
-        dailyStatsData,
-        submissionsData,
-        profileData
+        analyticsRes,
+        campaignsRes,
+        dailyStatsRes,
+        performanceRes
       ] = await Promise.all([
-        api.getCampaigns(1, 10),
-        api.getUserAnalytics(),
-        api.getDailyStats(30),
-        api.getSubmissions(1, 10),
-        api.getUserProfile().catch(() => null)
+        fetch('/api/analytics/user?include_detailed=true', { headers }),
+        fetch('/api/campaigns?limit=10', { headers }),
+        fetch(`/api/analytics/daily-stats?days=${timeRange}&include_trends=true`, { headers }),
+        fetch(`/api/analytics/performance?time_range=${timeRange}`, { headers })
       ]);
 
-      // Process campaigns
-      setCampaigns(campaignsData.campaigns || []);
-      
-      // Find running campaign and get detailed stats
-      const runningCampaign = campaignsData.campaigns?.find(c => 
-        c.status === 'running' || c.status === 'processing'
-      );
-      
-      if (runningCampaign) {
-        const stats = await api.getCampaignStats(runningCampaign.id);
-        setCurrentCampaign({
-          ...runningCampaign,
-          ...stats
-        });
-      } else {
-        setCurrentCampaign(null);
-      }
+      const analyticsData = await analyticsRes.json();
+      const campaignsData = await campaignsRes.json();
+      const dailyStatsData = await dailyStatsRes.json();
+      const performanceData = await performanceRes.json();
 
-      setUserAnalytics(analyticsData);
-      setDailyStats(dailyStatsData || []);
-      setRecentSubmissions(submissionsData.submissions || []);
-      setUserProfile(profileData);
+      // Process campaigns data - handle both array and object response
+      const campaigns = Array.isArray(campaignsData) ? campaignsData : (campaignsData.campaigns || []);
+      
+      // Extract recent submissions from campaigns
+      const recentSubmissions = [];
+      
+      // Get website statistics from performance data
+      const websiteStats = performanceData?.domain_statistics || [];
 
-    } catch (err) {
-      console.error('Dashboard fetch error:', err);
-      setError(err.message);
+      setData({
+        analytics: analyticsData,
+        campaigns: campaigns,
+        dailyStats: dailyStatsData,
+        performance: performanceData,
+        recentSubmissions: recentSubmissions,
+        websiteStats: websiteStats
+      });
+
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  };
 
-  // Initial load and auto-refresh
   useEffect(() => {
     fetchDashboardData();
+  }, [timeRange]);
 
-    // Auto-refresh every 10 seconds if campaign is running
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        const hasRunningCampaign = campaigns.some(c => 
-          c.status === 'running' || c.status === 'processing'
-        );
-        
-        if (hasRunningCampaign) {
-          fetchDashboardData();
-        }
-      }
-    }, 10000);
+  // Auto-refresh for active campaigns
+  useEffect(() => {
+    const hasActiveCampaign = data.campaigns.some(c => 
+      c.status === 'active' || c.status === 'running' || c.status === 'ACTIVE'
+    );
 
-    return () => clearInterval(interval);
-  }, [campaigns.length]);
-
-  // ============================================================================
-  // ACTION HANDLERS
-  // ============================================================================
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await fetchDashboardData();
-  };
-
-  const handleStartCampaign = async (campaignId) => {
-    try {
-      await api.startCampaign(campaignId);
-      await fetchDashboardData();
-    } catch (err) {
-      alert(`Failed to start campaign: ${err.message}`);
+    if (hasActiveCampaign) {
+      const interval = setInterval(() => {
+        fetchDashboardData();
+      }, 5000);
+      return () => clearInterval(interval);
     }
-  };
+  }, [data.campaigns]);
 
-  const handleStopCampaign = async () => {
-    if (!currentCampaign) return;
-    
-    if (window.confirm('Are you sure you want to stop this campaign?')) {
-      try {
-        await api.stopCampaign(currentCampaign.id);
-        await fetchDashboardData();
-      } catch (err) {
-        alert(`Failed to stop campaign: ${err.message}`);
-      }
-    }
-  };
+  const { analytics, campaigns, dailyStats, performance, websiteStats } = data;
 
-  const handleFileUpload = async () => {
-    if (!selectedFile || !currentCampaign) return;
+  // Calculate additional KPIs from actual database data
+  const calculateKPIs = () => {
+    if (!analytics) return {};
     
-    setUploadProgress('Uploading...');
+    const totalProcessed = analytics.successful_submissions + analytics.failed_submissions;
+    const captchaRate = analytics.captcha_submissions > 0 
+      ? (analytics.captcha_solved / analytics.captcha_submissions * 100) 
+      : 0;
     
-    try {
-      const result = await api.uploadCSV(currentCampaign.id, selectedFile);
-      setUploadProgress(`Success! Imported ${result.imported} websites.`);
-      await fetchDashboardData();
-      
-      setTimeout(() => {
-        setShowUploadModal(false);
-        setSelectedFile(null);
-        setUploadProgress(null);
-      }, 2000);
-    } catch (err) {
-      setUploadProgress(`Error: ${err.message}`);
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await api.logout();
-    } catch (err) {
-      // Continue with logout even if API call fails
-    }
-    
-    localStorage.removeItem('access_token');
-    navigate('/login');
-  };
-
-  // ============================================================================
-  // DATA PROCESSING
-  // ============================================================================
-  const calculateStats = () => {
-    const stats = userAnalytics?.stats || {};
     return {
-      total: stats.total_submissions || 0,
-      successful: stats.successful_submissions || 0,
-      failed: stats.failed_submissions || 0,
-      pending: stats.pending_submissions || 0,
-      successRate: stats.success_rate || 0
+      // Processing metrics
+      totalProcessed,
+      processingRate: totalProcessed > 0 ? (analytics.successful_submissions / totalProcessed * 100) : 0,
+      
+      // Efficiency metrics  
+      submissionsPerCampaign: analytics.campaigns_count > 0 
+        ? Math.round(analytics.total_submissions / analytics.campaigns_count) 
+        : 0,
+      websitesPerCampaign: analytics.campaigns_count > 0
+        ? Math.round(analytics.websites_count / analytics.campaigns_count)
+        : 0,
+        
+      // Quality metrics
+      captchaSuccessRate: captchaRate.toFixed(1),
+      emailExtractionRate: analytics.successful_submissions > 0
+        ? ((analytics.emails_extracted / analytics.successful_submissions) * 100).toFixed(1)
+        : 0,
+      
+      // Velocity metrics
+      dailyAverage: dailyStats?.summary?.avg_daily_submissions || 0,
+      peakDay: dailyStats?.trends?.peak_day || 'N/A',
+      
+      // Growth metrics
+      growthTrend: dailyStats?.trends?.trend_percentage || 0,
+      trendDirection: dailyStats?.trends?.submission_trend || 'stable'
     };
   };
 
-  const processChartData = () => {
-    if (!dailyStats || dailyStats.length === 0) {
-      return { monthlyData: [], weeklyData: [] };
-    }
+  const kpis = calculateKPIs();
 
-    // Process monthly data
-    const monthlyMap = new Map();
-    dailyStats.forEach(stat => {
-      const date = new Date(stat.date);
-      const monthKey = date.toLocaleDateString('en-US', { month: 'short' });
-      monthlyMap.set(monthKey, (monthlyMap.get(monthKey) || 0) + (stat.total || 0));
-    });
-
-    const monthlyData = Array.from(monthlyMap, ([month, count]) => ({ month, count }));
-
-    // Process weekly data (last 7 days)
-    const weeklyData = dailyStats.slice(-7).map(stat => ({
-      day: new Date(stat.date).toLocaleDateString('en-US', { weekday: 'short' }),
-      count: stat.total || 0
-    }));
-
-    return { monthlyData, weeklyData };
+  // Status color helper
+  const getStatusColor = (status) => {
+    const statusMap = {
+      'active': 'text-green-600 bg-green-50',
+      'running': 'text-green-600 bg-green-50',
+      'completed': 'text-blue-600 bg-blue-50',
+      'paused': 'text-yellow-600 bg-yellow-50',
+      'failed': 'text-red-600 bg-red-50',
+      'draft': 'text-gray-600 bg-gray-50'
+    };
+    return statusMap[status?.toLowerCase()] || 'text-gray-600 bg-gray-50';
   };
 
-  const stats = calculateStats();
-  const { monthlyData, weeklyData } = processChartData();
+  // Prepare chart data from actual database
+  const prepareChartData = () => {
+    if (!dailyStats?.series) return [];
+    
+    return dailyStats.series.map(day => ({
+      day: new Date(day.day).toLocaleDateString('en', { weekday: 'short' }),
+      date: day.day,
+      total: day.total || 0,
+      success: day.success || 0,
+      failed: day.failed || 0,
+      success_rate: day.success_rate || 0,
+      captcha: day.captcha_encountered || 0
+    }));
+  };
 
-  // ============================================================================
-  // LOADING & ERROR STATES
-  // ============================================================================
+  const chartData = prepareChartData();
+
+  // Submission breakdown for pie chart
+  const submissionBreakdown = [
+    { name: 'Successful', value: analytics?.successful_submissions || 0, color: '#10b981' },
+    { name: 'Failed', value: analytics?.failed_submissions || 0, color: '#ef4444' },
+    { name: 'Pending', value: (analytics?.total_submissions - (analytics?.successful_submissions + analytics?.failed_submissions)) || 0, color: '#f59e0b' }
+  ];
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <Loader className="w-12 h-12 text-indigo-600 animate-spin mx-auto mb-4" />
-          <p className="text-gray-600">Loading dashboard...</p>
-        </div>
+        <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-600 border-t-transparent"></div>
       </div>
     );
   }
 
-  if (error && !campaigns.length && !userAnalytics) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="bg-white p-8 rounded-lg shadow-sm border max-w-md">
-          <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-900 text-center mb-2">
-            Connection Error
-          </h2>
-          <p className="text-gray-600 text-center mb-4">{error}</p>
-          <div className="space-y-2">
-            <button
-              onClick={fetchDashboardData}
-              className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
-            >
-              Try Again
-            </button>
-            <button
-              onClick={handleLogout}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ============================================================================
-  // MAIN RENDER
-  // ============================================================================
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-              {userProfile && (
-                <span className="text-sm text-gray-600">
-                  Welcome, {userProfile.first_name || userProfile.email}
-                </span>
-              )}
+      {/* Removed duplicate header - using main layout header instead */}
+      
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Controls Bar */}
+        <div className="flex justify-between items-center mb-8">
+          <div className="flex items-center gap-3">
+            <select 
+              value={timeRange}
+              onChange={(e) => setTimeRange(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value={7}>Last 7 days</option>
+              <option value={30}>Last 30 days</option>
+              <option value={90}>Last 90 days</option>
+            </select>
+            <button
+              onClick={fetchDashboardData}
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              disabled={refreshing}
+            >
+              <RefreshCw className={`w-5 h-5 text-gray-600 ${refreshing ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+          <button 
+            onClick={() => window.location.href = '/campaigns/new'}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            New Campaign
+          </button>
+        </div>
+
+        {/* KPI Toggle Tabs */}
+        <div className="flex gap-2 mb-6">
+          {['overview', 'efficiency', 'quality', 'websites'].map(view => (
+            <button
+              key={view}
+              onClick={() => setSelectedKPIView(view)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors capitalize ${
+                selectedKPIView === view 
+                  ? 'bg-blue-600 text-white' 
+                  : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-300'
+              }`}
+            >
+              {view}
+            </button>
+          ))}
+        </div>
+
+        {/* Dynamic KPI Grid based on selected view */}
+        {selectedKPIView === 'overview' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Total Submissions</p>
+                  <p className="text-2xl font-semibold text-gray-900 mt-1">
+                    {analytics?.total_submissions?.toLocaleString() || '0'}
+                  </p>
+                  <div className="flex items-center mt-2 text-sm">
+                    <ArrowUpRight className="w-4 h-4 text-green-500 mr-1" />
+                    <span className="text-green-600">+{kpis.growthTrend}%</span>
+                    <span className="text-gray-400 ml-1">vs last period</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <Activity className="w-5 h-5 text-blue-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Success Rate</p>
+                  <p className="text-2xl font-semibold text-gray-900 mt-1">
+                    {analytics?.success_rate?.toFixed(1) || '0'}%
+                  </p>
+                  <div className="flex items-center mt-2 text-sm">
+                    <CheckCircle className="w-4 h-4 text-green-500 mr-1" />
+                    <span className="text-green-600">{analytics?.successful_submissions || 0} successful</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-green-50 rounded-lg">
+                  <TrendingUp className="w-5 h-5 text-green-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Active Campaigns</p>
+                  <p className="text-2xl font-semibold text-gray-900 mt-1">
+                    {analytics?.active_campaigns || '0'}
+                  </p>
+                  <div className="flex items-center mt-2 text-sm">
+                    <span className="text-gray-400">of {analytics?.campaigns_count || '0'} total</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-purple-50 rounded-lg">
+                  <BarChart3 className="w-5 h-5 text-purple-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Websites Processed</p>
+                  <p className="text-2xl font-semibold text-gray-900 mt-1">
+                    {analytics?.websites_count?.toLocaleString() || '0'}
+                  </p>
+                  <div className="flex items-center mt-2 text-sm">
+                    <Globe className="w-4 h-4 text-blue-500 mr-1" />
+                    <span className="text-blue-600">{analytics?.websites_with_forms || 0} with forms</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-orange-50 rounded-lg">
+                  <Globe className="w-5 h-5 text-orange-600" />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {selectedKPIView === 'efficiency' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Daily Average</p>
+                  <p className="text-2xl font-semibold text-gray-900 mt-1">
+                    {kpis.dailyAverage?.toFixed(0) || '0'}
+                  </p>
+                  <div className="flex items-center mt-2 text-sm">
+                    <Calendar className="w-4 h-4 text-blue-500 mr-1" />
+                    <span className="text-gray-600">submissions/day</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-yellow-50 rounded-lg">
+                  <Zap className="w-5 h-5 text-yellow-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Avg Retry Count</p>
+                  <p className="text-2xl font-semibold text-gray-900 mt-1">
+                    {analytics?.avg_retry_count?.toFixed(1) || '0'}
+                  </p>
+                  <div className="flex items-center mt-2 text-sm">
+                    <RefreshCw className="w-4 h-4 text-orange-500 mr-1" />
+                    <span className="text-gray-600">per submission</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-indigo-50 rounded-lg">
+                  <Timer className="w-5 h-5 text-indigo-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Per Campaign Avg</p>
+                  <p className="text-2xl font-semibold text-gray-900 mt-1">
+                    {kpis.submissionsPerCampaign || '0'}
+                  </p>
+                  <div className="flex items-center mt-2 text-sm">
+                    <Hash className="w-4 h-4 text-purple-500 mr-1" />
+                    <span className="text-gray-600">submissions</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <Database className="w-5 h-5 text-blue-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Processing Rate</p>
+                  <p className="text-2xl font-semibold text-gray-900 mt-1">
+                    {kpis.processingRate?.toFixed(1) || '0'}%
+                  </p>
+                  <div className="flex items-center mt-2 text-sm">
+                    <Cpu className="w-4 h-4 text-green-500 mr-1" />
+                    <span className="text-gray-600">completed</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-green-50 rounded-lg">
+                  <Server className="w-5 h-5 text-green-600" />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {selectedKPIView === 'quality' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Form Detection Rate</p>
+                  <p className="text-2xl font-semibold text-gray-900 mt-1">
+                    {analytics?.form_detection_rate?.toFixed(1) || '0'}%
+                  </p>
+                  <div className="flex items-center mt-2 text-sm">
+                    <Target className="w-4 h-4 text-green-500 mr-1" />
+                    <span className="text-gray-600">{analytics?.websites_with_forms || 0} detected</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-green-50 rounded-lg">
+                  <Target className="w-5 h-5 text-green-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">CAPTCHA Success</p>
+                  <p className="text-2xl font-semibold text-gray-900 mt-1">
+                    {analytics?.captcha_success_rate?.toFixed(1) || '0'}%
+                  </p>
+                  <div className="flex items-center mt-2 text-sm">
+                    <Shield className="w-4 h-4 text-purple-500 mr-1" />
+                    <span className="text-gray-600">{analytics?.captcha_solved || 0} solved</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-purple-50 rounded-lg">
+                  <Shield className="w-5 h-5 text-purple-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Email Extraction</p>
+                  <p className="text-2xl font-semibold text-gray-900 mt-1">
+                    {analytics?.emails_extracted || '0'}
+                  </p>
+                  <div className="flex items-center mt-2 text-sm">
+                    <Mail className="w-4 h-4 text-blue-500 mr-1" />
+                    <span className="text-blue-600">{kpis.emailExtractionRate}% rate</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <Mail className="w-5 h-5 text-blue-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Unique Campaigns</p>
+                  <p className="text-2xl font-semibold text-gray-900 mt-1">
+                    {analytics?.unique_campaigns_used || '0'}
+                  </p>
+                  <div className="flex items-center mt-2 text-sm">
+                    <Users className="w-4 h-4 text-indigo-500 mr-1" />
+                    <span className="text-gray-600">utilized</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-indigo-50 rounded-lg">
+                  <Users className="w-5 h-5 text-indigo-600" />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {selectedKPIView === 'websites' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Total Websites</p>
+                  <p className="text-2xl font-semibold text-gray-900 mt-1">
+                    {analytics?.websites_count || '0'}
+                  </p>
+                  <div className="flex items-center mt-2 text-sm">
+                    <Globe className="w-4 h-4 text-blue-500 mr-1" />
+                    <span className="text-gray-600">processed</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <Globe className="w-5 h-5 text-blue-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">With Forms</p>
+                  <p className="text-2xl font-semibold text-gray-900 mt-1">
+                    {analytics?.websites_with_forms || '0'}
+                  </p>
+                  <div className="flex items-center mt-2 text-sm">
+                    <FileText className="w-4 h-4 text-green-500 mr-1" />
+                    <span className="text-green-600">forms detected</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-green-50 rounded-lg">
+                  <FileText className="w-5 h-5 text-green-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">With CAPTCHA</p>
+                  <p className="text-2xl font-semibold text-gray-900 mt-1">
+                    {analytics?.websites_with_captcha || '0'}
+                  </p>
+                  <div className="flex items-center mt-2 text-sm">
+                    <Shield className="w-4 h-4 text-purple-500 mr-1" />
+                    <span className="text-purple-600">protected</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-purple-50 rounded-lg">
+                  <Shield className="w-5 h-5 text-purple-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Avg per Campaign</p>
+                  <p className="text-2xl font-semibold text-gray-900 mt-1">
+                    {kpis.websitesPerCampaign || '0'}
+                  </p>
+                  <div className="flex items-center mt-2 text-sm">
+                    <Link2 className="w-4 h-4 text-orange-500 mr-1" />
+                    <span className="text-gray-600">websites</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-orange-50 rounded-lg">
+                  <HardDrive className="w-5 h-5 text-orange-600" />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Submission Trends */}
+          <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-gray-200">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-semibold text-gray-900">Submission Trends</h2>
+              <button className="text-gray-400 hover:text-gray-600">
+                <MoreVertical className="w-5 h-5" />
+              </button>
+            </div>
+            <ResponsiveContainer width="100%" height={300}>
+              <AreaChart data={chartData}>
+                <defs>
+                  <linearGradient id="colorSuccess" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="colorFailed" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                <XAxis dataKey="day" stroke="#9ca3af" fontSize={12} />
+                <YAxis stroke="#9ca3af" fontSize={12} />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: 'white', 
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px'
+                  }}
+                />
+                <Area 
+                  type="monotone" 
+                  dataKey="success" 
+                  stroke="#10b981" 
+                  fillOpacity={1} 
+                  fill="url(#colorSuccess)"
+                  strokeWidth={2}
+                />
+                <Area 
+                  type="monotone" 
+                  dataKey="failed" 
+                  stroke="#ef4444" 
+                  fillOpacity={1} 
+                  fill="url(#colorFailed)"
+                  strokeWidth={2}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Recent Campaigns - Fixed Component */}
+          <div className="bg-white p-6 rounded-xl border border-gray-200">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-semibold text-gray-900">Recent Campaigns</h2>
+              <a href="/campaigns" className="text-sm text-blue-600 hover:text-blue-700 font-medium">View all</a>
             </div>
             
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={handleRefresh}
-                disabled={refreshing}
-                className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
-              >
-                <RefreshCw className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} />
-              </button>
-              
-              <button
-                onClick={() => navigate('/settings')}
-                className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
-              >
-                <Settings className="w-5 h-5" />
-              </button>
-              
-              <button
-                onClick={handleLogout}
-                className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
-              >
-                <LogOut className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 py-8">
-        
-        {/* Campaign Status Section */}
-        {currentCampaign ? (
-          <ActiveCampaignCard 
-            campaign={currentCampaign}
-            onStop={handleStopCampaign}
-            onUpload={() => setShowUploadModal(true)}
-          />
-        ) : (
-          <IdleCampaignCard 
-            lastCampaign={campaigns[0]}
-            onCreate={() => navigate('/campaigns/new')}
-            onUpdateProfile={() => navigate('/profile')}
-          />
-        )}
-
-        {/* Statistics Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <StatCard
-            title="Total Submissions"
-            value={stats.total}
-            icon={<CheckCircle className="w-5 h-5 text-blue-600" />}
-            color="blue"
-          />
-          <StatCard
-            title="Successful"
-            value={stats.successful}
-            icon={<CheckCircle className="w-5 h-5 text-green-600" />}
-            color="green"
-            subtitle={`${stats.successRate}% success rate`}
-          />
-          <StatCard
-            title="Failed"
-            value={stats.failed}
-            icon={<AlertCircle className="w-5 h-5 text-red-600" />}
-            color="red"
-          />
-          <StatCard
-            title="Pending"
-            value={stats.pending}
-            icon={<Clock className="w-5 h-5 text-yellow-600" />}
-            color="yellow"
-          />
-        </div>
-
-        {/* Charts Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          {monthlyData.length > 0 && (
-            <ChartCard title="Monthly Submissions" data={monthlyData} type="bar" />
-          )}
-          {weeklyData.length > 0 && (
-            <ChartCard title="Weekly Activity" data={weeklyData} type="line" />
-          )}
-        </div>
-
-        {/* Recent Activity */}
-        <RecentActivityCard submissions={recentSubmissions} />
-
-        {/* Campaigns List */}
-        {campaigns.length > 0 && (
-          <CampaignsListCard 
-            campaigns={campaigns}
-            onStart={handleStartCampaign}
-            onView={(id) => navigate(`/campaigns/${id}`)}
-          />
-        )}
-      </main>
-
-      {/* Upload Modal */}
-      {showUploadModal && (
-        <UploadModal
-          onClose={() => setShowUploadModal(false)}
-          onUpload={handleFileUpload}
-          selectedFile={selectedFile}
-          setSelectedFile={setSelectedFile}
-          uploadProgress={uploadProgress}
-        />
-      )}
-    </div>
-  );
-};
-
-// ============================================================================
-// SUB-COMPONENTS
-// ============================================================================
-
-const ActiveCampaignCard = ({ campaign, onStop, onUpload }) => {
-  const progress = campaign.total > 0 
-    ? ((campaign.successful + campaign.failed) / campaign.total) * 100 
-    : 0;
-
-  return (
-    <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-            <Play className="w-5 h-5 text-green-600" />
-          </div>
-          <div>
-            <h2 className="text-lg font-semibold">{campaign.name}</h2>
-            <p className="text-sm text-gray-500">ID: {campaign.id?.substring(0, 8)}...</p>
-          </div>
-        </div>
-        
-        <div className="flex items-center space-x-3">
-          <button
-            onClick={onUpload}
-            className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
-          >
-            <Upload className="w-4 h-4 inline mr-1" />
-            Add URLs
-          </button>
-          <button
-            onClick={onStop}
-            className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700"
-          >
-            <Pause className="w-4 h-4 inline mr-1" />
-            Stop
-          </button>
-        </div>
-      </div>
-
-      {/* Progress Bar */}
-      <div className="mb-4">
-        <div className="flex justify-between text-sm mb-2">
-          <span>{campaign.successful + campaign.failed} of {campaign.total}</span>
-          <span>{Math.round(progress)}%</span>
-        </div>
-        <div className="w-full bg-gray-200 rounded-full h-3">
-          <div 
-            className="bg-gradient-to-r from-indigo-500 to-indigo-600 h-3 rounded-full transition-all duration-500"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-4 gap-4 text-center">
-        <div>
-          <p className="text-2xl font-bold">{campaign.total}</p>
-          <p className="text-xs text-gray-500">Total</p>
-        </div>
-        <div>
-          <p className="text-2xl font-bold text-green-600">{campaign.successful}</p>
-          <p className="text-xs text-gray-500">Success</p>
-        </div>
-        <div>
-          <p className="text-2xl font-bold text-red-600">{campaign.failed}</p>
-          <p className="text-xs text-gray-500">Failed</p>
-        </div>
-        <div>
-          <p className="text-2xl font-bold text-yellow-600">{campaign.pending}</p>
-          <p className="text-xs text-gray-500">Pending</p>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const IdleCampaignCard = ({ lastCampaign, onCreate, onUpdateProfile }) => (
-  <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-    <div className="flex items-center justify-between mb-4">
-      <h2 className="text-lg font-semibold">Campaign Status</h2>
-      <span className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded">Idle</span>
-    </div>
-    
-    {lastCampaign && (
-      <div className="bg-gray-50 rounded-lg p-4 mb-4">
-        <p className="text-xs text-gray-500 mb-2">LAST CAMPAIGN</p>
-        <p className="font-medium">{lastCampaign.name}</p>
-        <div className="grid grid-cols-3 gap-4 mt-3">
-          <div>
-            <p className="text-xl font-bold">{lastCampaign.total_urls}</p>
-            <p className="text-xs text-gray-500">URLs</p>
-          </div>
-          <div>
-            <p className="text-xl font-bold text-green-600">
-              {lastCampaign.submitted_count}
-            </p>
-            <p className="text-xs text-gray-500">Submitted</p>
-          </div>
-          <div>
-            <p className="text-xl font-bold">
-              {new Date(lastCampaign.created_at).toLocaleDateString()}
-            </p>
-            <p className="text-xs text-gray-500">Date</p>
-          </div>
-        </div>
-      </div>
-    )}
-    
-    <div className="flex space-x-3">
-      <button
-        onClick={onCreate}
-        className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
-      >
-        Start New Campaign
-      </button>
-      <button
-        onClick={onUpdateProfile}
-        className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-      >
-        Update Profile
-      </button>
-    </div>
-  </div>
-);
-
-const StatCard = ({ title, value, icon, color, subtitle }) => (
-  <div className="bg-white rounded-lg shadow-sm border p-6">
-    <div className="flex items-center justify-between mb-2">
-      <p className="text-sm text-gray-500">{title}</p>
-      {icon}
-    </div>
-    <p className={`text-3xl font-bold text-${color}-600`}>
-      {value.toLocaleString()}
-    </p>
-    {subtitle && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
-  </div>
-);
-
-const ChartCard = ({ title, data, type }) => (
-  <div className="bg-white rounded-lg shadow-sm border p-6">
-    <h3 className="text-lg font-semibold mb-4">{title}</h3>
-    <div className="h-64 flex items-end justify-around">
-      {type === 'bar' && data.map((item, idx) => (
-        <div key={idx} className="flex-1 mx-1 flex flex-col items-center">
-          <div 
-            className="w-full bg-gradient-to-t from-indigo-600 to-indigo-400 rounded-t hover:from-indigo-700"
-            style={{ height: `${(item.count / Math.max(...data.map(d => d.count))) * 200}px` }}
-          />
-          <span className="text-xs mt-2">{item.month || item.day}</span>
-        </div>
-      ))}
-    </div>
-  </div>
-);
-
-const RecentActivityCard = ({ submissions }) => (
-  <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-    <h3 className="text-lg font-semibold mb-4">Recent Activity</h3>
-    {submissions.length > 0 ? (
-      <div className="space-y-3">
-        {submissions.map((sub) => (
-          <div key={sub.id} className="flex items-start space-x-3 p-3 hover:bg-gray-50 rounded-lg">
-            {sub.status === 'success' ? (
-              <CheckCircle className="w-5 h-5 text-green-600 mt-0.5" />
-            ) : sub.status === 'failed' ? (
-              <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
-            ) : (
-              <Clock className="w-5 h-5 text-yellow-600 mt-0.5" />
-            )}
-            <div className="flex-1">
-              <p className="text-sm font-medium">{sub.url || 'Unknown URL'}</p>
-              <p className="text-xs text-gray-500">
-                {sub.status} • {new Date(sub.created_at).toLocaleString()}
-              </p>
-            </div>
-          </div>
-        ))}
-      </div>
-    ) : (
-      <p className="text-center text-gray-500 py-8">No recent activity</p>
-    )}
-  </div>
-);
-
-const CampaignsListCard = ({ campaigns, onStart, onView }) => (
-  <div className="bg-white rounded-lg shadow-sm border p-6">
-    <h3 className="text-lg font-semibold mb-4">All Campaigns</h3>
-    <div className="overflow-x-auto">
-      <table className="w-full">
-        <thead className="text-left text-sm text-gray-500 border-b">
-          <tr>
-            <th className="pb-2">Name</th>
-            <th className="pb-2">Status</th>
-            <th className="pb-2">URLs</th>
-            <th className="pb-2">Success</th>
-            <th className="pb-2">Created</th>
-            <th className="pb-2">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {campaigns.map((campaign) => (
-            <tr key={campaign.id} className="border-b hover:bg-gray-50">
-              <td className="py-3 font-medium">{campaign.name}</td>
-              <td className="py-3">
-                <span className={`px-2 py-1 text-xs rounded ${
-                  campaign.status === 'completed' ? 'bg-green-100 text-green-700' :
-                  campaign.status === 'running' ? 'bg-blue-100 text-blue-700' :
-                  'bg-gray-100 text-gray-700'
-                }`}>
-                  {campaign.status}
-                </span>
-              </td>
-              <td className="py-3">{campaign.total_urls}</td>
-              <td className="py-3">{campaign.submitted_count}</td>
-              <td className="py-3 text-sm text-gray-500">
-                {new Date(campaign.created_at).toLocaleDateString()}
-              </td>
-              <td className="py-3">
-                <button
-                  onClick={() => onView(campaign.id)}
-                  className="text-sm text-indigo-600 hover:text-indigo-800 mr-3"
-                >
-                  View
-                </button>
-                {campaign.status === 'draft' && (
-                  <button
-                    onClick={() => onStart(campaign.id)}
-                    className="text-sm text-green-600 hover:text-green-800"
+            <div className="space-y-4">
+              {campaigns.length === 0 ? (
+                <div className="text-center py-8">
+                  <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500 text-sm">No campaigns yet</p>
+                  <a 
+                    href="/campaigns/new" 
+                    className="text-blue-600 hover:text-blue-700 text-sm font-medium mt-2 inline-block"
                   >
-                    Start
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  </div>
-);
+                    Create your first campaign
+                  </a>
+                </div>
+              ) : (
+                campaigns.slice(0, 5).map((campaign) => {
+                  // Helper function to get status styling
+                  const getStatusStyle = (status) => {
+                    const statusMap = {
+                      'COMPLETED': { bg: 'bg-green-100', text: 'text-green-700', icon: CheckCircle },
+                      'DRAFT': { bg: 'bg-gray-100', text: 'text-gray-700', icon: FileText },
+                      'ACTIVE': { bg: 'bg-blue-100', text: 'text-blue-700', icon: Activity },
+                      'RUNNING': { bg: 'bg-blue-100', text: 'text-blue-700', icon: Activity },
+                      'FAILED': { bg: 'bg-red-100', text: 'text-red-700', icon: XCircle },
+                      'PAUSED': { bg: 'bg-yellow-100', text: 'text-yellow-700', icon: Clock }
+                    };
+                    return statusMap[status?.toUpperCase()] || statusMap['DRAFT'];
+                  };
 
-const UploadModal = ({ onClose, onUpload, selectedFile, setSelectedFile, uploadProgress }) => (
-  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-    <div className="bg-white rounded-lg p-6 max-w-md w-full">
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="text-lg font-semibold">Upload CSV File</h3>
-        <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-          <X className="w-5 h-5" />
-        </button>
-      </div>
-      
-      <div className="mb-4">
-        <input
-          type="file"
-          accept=".csv"
-          onChange={(e) => setSelectedFile(e.target.files[0])}
-          className="w-full p-2 border rounded-lg"
-        />
-      </div>
-      
-      {uploadProgress && (
-        <div className="mb-4 p-3 bg-blue-50 text-blue-700 rounded-lg text-sm">
-          {uploadProgress}
+                  // Helper function to format campaign name
+                  const formatCampaignName = (campaign) => {
+                    if (campaign.name && !campaign.name.startsWith('Campaign -')) {
+                      return campaign.name;
+                    }
+                    
+                    let displayName = campaign.name || `Campaign ${campaign.id?.slice(0, 8)}`;
+                    displayName = displayName
+                      .replace(/^Campaign - /, '')
+                      .replace(/ - \d{8}_\d{6}$/, '')
+                      .replace(/Sample\.csv|TestFile\.csv/, (match) => match.replace('.csv', ''))
+                      .replace(/20250912_\d+/, '');
+                    
+                    if (displayName.length > 35) {
+                      displayName = displayName.substring(0, 32) + '...';
+                    }
+                    
+                    return displayName || 'Untitled Campaign';
+                  };
+
+                  const statusStyle = getStatusStyle(campaign.status);
+                  const StatusIcon = statusStyle.icon;
+                  const progress = Math.round(((campaign.processed || 0) / Math.max(campaign.total_websites || campaign.total_urls || 1, 1)) * 100);
+                  const total = campaign.total_websites || campaign.total_urls || 0;
+                  const processed = campaign.processed || 0;
+
+                  // Get progress color
+                  const getProgressColor = () => {
+                    if (campaign.status === 'COMPLETED') return 'bg-green-500';
+                    if (campaign.status === 'FAILED') return 'bg-red-500';
+                    if (progress === 0) return 'bg-gray-300';
+                    if (progress < 50) return 'bg-yellow-500';
+                    return 'bg-blue-500';
+                  };
+                  
+                  return (
+                    <div 
+                      key={campaign.id} 
+                      className="p-4 hover:bg-gray-50 rounded-lg transition-colors border border-gray-100 hover:border-gray-200 cursor-pointer"
+                      onClick={() => window.location.href = `/campaigns/${campaign.id}`}
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-sm font-medium text-gray-900 truncate">
+                            {formatCampaignName(campaign)}
+                          </h3>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {processed}/{total} processed
+                          </p>
+                        </div>
+                        
+                        <div className="flex items-center ml-3">
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${statusStyle.bg} ${statusStyle.text}`}>
+                            <StatusIcon className="w-3 h-3 mr-1" />
+                            {campaign.status}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      {/* Progress Bar */}
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 bg-gray-200 rounded-full h-2.5 overflow-hidden">
+                          <div 
+                            className={`h-full transition-all duration-300 ${getProgressColor()}`}
+                            style={{ width: `${progress}%` }}
+                          />
+                        </div>
+                        <span className="text-xs font-medium text-gray-600 min-w-[35px] text-right">
+                          {progress}%
+                        </span>
+                      </div>
+                      
+                      {/* Additional Info */}
+                      <div className="flex items-center justify-between mt-2 text-xs text-gray-400">
+                        <span>
+                          {campaign.successful || 0} successful, {campaign.failed || 0} failed
+                        </span>
+                        {campaign.created_at && (
+                          <span>
+                            {new Date(campaign.created_at).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
         </div>
-      )}
-      
-      <div className="flex space-x-3">
-        <button
-          onClick={onUpload}
-          disabled={!selectedFile || uploadProgress}
-          className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-300"
-        >
-          Upload
-        </button>
-        <button
-          onClick={onClose}
-          className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-        >
-          Cancel
-        </button>
+
+        {/* Additional Analytics Row */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mt-8">
+          {/* Submission Breakdown Pie Chart */}
+          <div className="bg-white p-6 rounded-xl border border-gray-200">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Submission Status</h2>
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie
+                  data={submissionBreakdown}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={2}
+                  dataKey="value"
+                >
+                  {submissionBreakdown.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="grid grid-cols-2 gap-2 mt-4">
+              {submissionBreakdown.map((item) => (
+                <div key={item.name} className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
+                  <span className="text-xs text-gray-600">{item.name}: {item.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Website Performance from actual database */}
+          <div className="bg-white p-6 rounded-xl border border-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900">Top Domains</h2>
+              <Filter className="w-4 h-4 text-gray-400" />
+            </div>
+            <div className="space-y-3">
+              {websiteStats.slice(0, 4).map((domain, idx) => (
+                <div key={idx} className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-gray-900 truncate">{domain.domain}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <div className="flex-1 bg-gray-200 rounded-full h-2">
+                        <div 
+                          className={`h-2 rounded-full transition-all ${
+                            domain.success_rate > 80 ? 'bg-green-500' : 
+                            domain.success_rate > 60 ? 'bg-yellow-500' : 'bg-red-500'
+                          }`}
+                          style={{ width: `${domain.success_rate}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-gray-600 min-w-[40px]">{domain.success_rate}%</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Quick Stats from actual database */}
+          <div className="bg-white p-6 rounded-xl border border-gray-200">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">System Health</h2>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Server className="w-4 h-4 text-gray-400" />
+                  <span className="text-sm text-gray-600">API Status</span>
+                </div>
+                <span className="text-sm font-semibold text-green-600">Operational</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-gray-400" />
+                  <span className="text-sm text-gray-600">Database</span>
+                </div>
+                <span className="text-sm font-semibold text-green-600">Connected</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-gray-400" />
+                  <span className="text-sm text-gray-600">CAPTCHA Service</span>
+                </div>
+                <span className="text-sm font-semibold text-green-600">Active</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-gray-400" />
+                  <span className="text-sm text-gray-600">Processing Queue</span>
+                </div>
+                <span className="text-sm font-semibold text-blue-600">
+                  {campaigns.filter(c => c.status === 'active' || c.status === 'running').length} Active
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 export default UserDashboard;

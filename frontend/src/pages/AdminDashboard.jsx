@@ -1,62 +1,75 @@
 import React, { useState } from "react";
-import { 
-  TrendingUp, Users, FileText, Shield, Activity, DollarSign, Clock, Mail, 
-  Database, Server, HardDrive, Cpu, CheckCircle, AlertCircle, Settings, 
-  RefreshCw, Download, Filter, Search, Calendar, MoreVertical, BarChart3,
-  Target, Zap, Globe, UserCheck, AlertTriangle
+import {
+  TrendingUp, Users, FileText, Shield, Activity, DollarSign,
+  Clock, Mail, Database, Server, HardDrive, Cpu, CheckCircle,
+  AlertCircle, Settings, RefreshCw, Download, Filter, Search,
+  Calendar, MoreVertical, BarChart3, Target, Zap, Globe,
+  UserCheck, AlertTriangle, ArrowUpRight, ArrowDownRight,
+  Eye, Edit3, Trash2, Plus, ChevronRight, Star, Award,
+  Sparkles, Bell, Lock, Key, CreditCard, Package
 } from "lucide-react";
 
 const AdminDashboard = () => {
   const [selectedPeriod, setSelectedPeriod] = useState("month");
   const [activeTab, setActiveTab] = useState("overview");
   const [searchQuery, setSearchQuery] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedMetric, setSelectedMetric] = useState("users");
 
-  // Enhanced stats with gradient colors
+  // Enhanced stats with gradient colors and more detail
   const stats = [
-    { 
-      label: "Total Users", 
-      value: "412", 
-      icon: Users, 
-      trend: "+12.5%", 
+    {
+      label: "Total Users",
+      value: "412",
+      icon: Users,
+      trend: "+12.5%",
       trendUp: true,
-      color: "from-blue-500 to-blue-600",
+      color: "from-blue-500 to-cyan-500",
       lightColor: "bg-blue-100",
       iconColor: "text-blue-600",
-      description: "Active accounts"
+      description: "Active accounts",
+      sparkline: [40, 45, 42, 48, 52, 58, 55, 60],
+      details: { new: 47, inactive: 23, premium: 156 }
     },
-    { 
-      label: "Active Campaigns", 
-      value: "8,243", 
-      icon: Activity, 
-      trend: "+8.2%", 
+    {
+      label: "Active Campaigns",
+      value: "8,243",
+      icon: Activity,
+      trend: "+8.2%",
       trendUp: true,
-      color: "from-purple-500 to-purple-600",
+      color: "from-purple-500 to-pink-500",
       lightColor: "bg-purple-100",
       iconColor: "text-purple-600",
-      description: "Running now"
+      description: "Running now",
+      sparkline: [820, 850, 890, 920, 960, 1000, 980, 1050],
+      details: { processing: 3421, completed: 4822, failed: 0 }
     },
-    { 
-      label: "Form Submissions", 
-      value: "211K", 
-      icon: FileText, 
-      trend: "+23.1%", 
+    {
+      label: "Form Submissions",
+      value: "211K",
+      icon: FileText,
+      trend: "+23.1%",
       trendUp: true,
-      color: "from-green-500 to-green-600",
+      color: "from-green-500 to-emerald-500",
       lightColor: "bg-green-100",
       iconColor: "text-green-600",
-      description: "This month"
+      description: "This month",
+      sparkline: [18, 22, 20, 25, 28, 32, 30, 35],
+      details: { successful: 198000, failed: 13000, pending: 0 }
     },
-    { 
-      label: "Success Rate", 
-      value: "96.8%", 
-      icon: Target, 
-      trend: "+2.4%", 
+    {
+      label: "Success Rate",
+      value: "96.8%",
+      icon: Target,
+      trend: "+2.4%",
       trendUp: true,
-      color: "from-orange-500 to-orange-600",
+      color: "from-orange-500 to-red-500",
       lightColor: "bg-orange-100",
       iconColor: "text-orange-600",
-      description: "Average rate"
-    },
+      description: "Average rate",
+      sparkline: [94, 95, 94.5, 95.5, 96, 96.5, 96.8, 97],
+      details: { best: "99.2%", worst: "89.3%", median: "96.5%" }
+    }
   ];
 
   // Database health metrics
@@ -69,105 +82,214 @@ const AdminDashboard = () => {
     activeConnections: 18,
     maxConnections: 100,
     cacheHitRate: 94.7,
-    uptime: "99.99%"
+    uptime: "99.99%",
+    lastBackup: "2 hours ago",
+    nextMaintenance: "In 5 days"
   };
 
   // Monthly data for charts
   const monthlyData = [
-    { month: 'Jan', users: 280, campaigns: 1200, submissions: 18500 },
-    { month: 'Feb', users: 320, campaigns: 1900, submissions: 24300 },
-    { month: 'Mar', users: 340, campaigns: 2400, submissions: 31200 },
-    { month: 'Apr', users: 360, campaigns: 2100, submissions: 28900 },
-    { month: 'May', users: 380, campaigns: 2800, submissions: 38400 },
+    { month: "Jan", users: 280, campaigns: 1200, submissions: 18500, revenue: 32000 },
+    { month: "Feb", users: 320, campaigns: 1900, submissions: 24300, revenue: 36000 },
+    { month: "Mar", users: 340, campaigns: 2400, submissions: 31200, revenue: 41000 },
+    { month: "Apr", users: 360, campaigns: 2100, submissions: 28900, revenue: 38000 },
+    { month: "May", users: 380, campaigns: 2800, submissions: 38400, revenue: 45000 },
+    { month: "Jun", users: 412, campaigns: 3200, submissions: 42100, revenue: 52000 },
   ];
 
-  // Weekly activity data
-  const weeklyActivity = [
-    { day: 'Mon', submissions: 4200 },
-    { day: 'Tue', submissions: 5800 },
-    { day: 'Wed', submissions: 4900 },
-    { day: 'Thu', submissions: 6200 },
-    { day: 'Fri', submissions: 7100 },
-    { day: 'Sat', submissions: 5500 },
-    { day: 'Sun', submissions: 3800 },
-  ];
-
-  // Form types distribution
-  const formTypes = [
-    { label: 'Contact Forms', value: 45230, color: '#10B981', percentage: 42 },
-    { label: 'Registration', value: 38940, color: '#F59E0B', percentage: 36 },
-    { label: 'Surveys', value: 24100, color: '#EF4444', percentage: 22 },
-  ];
-
-  // Database tables
-  const tableInfo = [
-    { name: "users", records: 412, size: "8.4 MB", lastModified: "2 min ago", status: "optimal" },
-    { name: "campaigns", records: 8243, size: "124.6 MB", lastModified: "5 min ago", status: "optimal" },
-    { name: "submissions", records: 211875, size: "856.2 MB", lastModified: "Just now", status: "indexing" },
-    { name: "captcha_logs", records: 173093, size: "234.5 MB", lastModified: "30 sec ago", status: "optimal" },
-  ];
-
-  // Recent activity
+  // Recent activity with enhanced details
   const recentActivity = [
-    { type: 'user', message: 'New user registered: john.doe@example.com', time: '2 minutes ago', icon: UserCheck, color: 'text-green-600' },
-    { type: 'campaign', message: 'Campaign #8243 started processing', time: '5 minutes ago', icon: Activity, color: 'text-blue-600' },
-    { type: 'error', message: 'Failed CAPTCHA validation for 3 submissions', time: '12 minutes ago', icon: AlertTriangle, color: 'text-red-600' },
-    { type: 'system', message: 'Database backup completed successfully', time: '1 hour ago', icon: Database, color: 'text-purple-600' },
+    {
+      type: "user",
+      message: "New enterprise user registered",
+      detail: "john.doe@techcorp.com - Enterprise Plan",
+      time: "2 minutes ago",
+      icon: UserCheck,
+      color: "text-green-600",
+      bgColor: "bg-green-100",
+      importance: "high"
+    },
+    {
+      type: "campaign",
+      message: "Large campaign started",
+      detail: "Campaign #8243 - 5,000 URLs processing",
+      time: "5 minutes ago",
+      icon: Activity,
+      color: "text-blue-600",
+      bgColor: "bg-blue-100",
+      importance: "medium"
+    },
+    {
+      type: "error",
+      message: "CAPTCHA service issue detected",
+      detail: "3 failed validations in the last hour",
+      time: "12 minutes ago",
+      icon: AlertTriangle,
+      color: "text-red-600",
+      bgColor: "bg-red-100",
+      importance: "high"
+    },
+    {
+      type: "system",
+      message: "Database optimization completed",
+      detail: "Performance improved by 15%",
+      time: "1 hour ago",
+      icon: Database,
+      color: "text-purple-600",
+      bgColor: "bg-purple-100",
+      importance: "low"
+    }
   ];
 
-  const maxMonthlySubmissions = Math.max(...monthlyData.map(d => d.submissions));
-  const maxWeeklyActivity = Math.max(...weeklyActivity.map(d => d.submissions));
+  // User management table data
+  const users = [
+    {
+      id: 1,
+      name: "Sarah Johnson",
+      email: "sarah@company.com",
+      plan: "Enterprise",
+      status: "active",
+      campaigns: 42,
+      submissions: 12500,
+      successRate: 98.2,
+      lastActive: "2 min ago",
+      avatar: "SJ"
+    },
+    {
+      id: 2,
+      name: "Mike Chen",
+      email: "mike@startup.io",
+      plan: "Professional",
+      status: "active",
+      campaigns: 28,
+      submissions: 8300,
+      successRate: 95.7,
+      lastActive: "1 hour ago",
+      avatar: "MC"
+    },
+    {
+      id: 3,
+      name: "Emma Davis",
+      email: "emma@agency.co",
+      plan: "Business",
+      status: "inactive",
+      campaigns: 15,
+      submissions: 4200,
+      successRate: 93.4,
+      lastActive: "3 days ago",
+      avatar: "ED"
+    }
+  ];
 
-  // Donut chart path calculation
-  const createDonutPath = (value, total, startAngle) => {
-    const percentage = value / total;
-    const angle = percentage * 360;
-    const endAngle = startAngle + angle;
+  // Sparkline component
+  const Sparkline = ({ data, color }) => {
+    const max = Math.max(...data);
+    const min = Math.min(...data);
+    const range = max - min;
     
-    const outerRadius = 70;
-    const innerRadius = 45;
-    const cx = 85;
-    const cy = 85;
-    
-    const x1 = cx + outerRadius * Math.cos((startAngle * Math.PI) / 180);
-    const y1 = cy + outerRadius * Math.sin((startAngle * Math.PI) / 180);
-    const x2 = cx + outerRadius * Math.cos((endAngle * Math.PI) / 180);
-    const y2 = cy + outerRadius * Math.sin((endAngle * Math.PI) / 180);
-    const x3 = cx + innerRadius * Math.cos((endAngle * Math.PI) / 180);
-    const y3 = cy + innerRadius * Math.sin((endAngle * Math.PI) / 180);
-    const x4 = cx + innerRadius * Math.cos((startAngle * Math.PI) / 180);
-    const y4 = cy + innerRadius * Math.sin((startAngle * Math.PI) / 180);
-    
-    const largeArcFlag = angle > 180 ? 1 : 0;
-    
-    return `M ${x1} ${y1} A ${outerRadius} ${outerRadius} 0 ${largeArcFlag} 1 ${x2} ${y2} L ${x3} ${y3} A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 0 ${x4} ${y4} Z`;
+    return (
+      <div className="flex items-end gap-0.5 h-8">
+        {data.map((value, idx) => {
+          const height = ((value - min) / range) * 100;
+          return (
+            <div
+              key={idx}
+              className={`w-1 bg-gradient-to-t ${color} rounded-full transition-all hover:opacity-80`}
+              style={{ height: `${height}%`, minHeight: '3px' }}
+            />
+          );
+        })}
+      </div>
+    );
   };
 
-  const donutTotal = formTypes.reduce((sum, item) => sum + item.value, 0);
-  let currentAngle = -90;
+  const StatCard = ({ stat, index }) => {
+    const Icon = stat.icon;
+    const isSelected = selectedMetric === stat.label.toLowerCase().replace(' ', '-');
+    
+    return (
+      <div
+        onClick={() => setSelectedMetric(stat.label.toLowerCase().replace(' ', '-'))}
+        className={`bg-white rounded-2xl border p-6 cursor-pointer transition-all duration-300 ${
+          isSelected 
+            ? 'border-blue-500 shadow-xl scale-[1.02] ring-2 ring-blue-200' 
+            : 'border-gray-200 hover:shadow-lg hover:scale-[1.01]'
+        }`}
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div className={`${stat.lightColor} p-3 rounded-xl`}>
+            <Icon className={`w-6 h-6 ${stat.iconColor}`} />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`text-xs font-bold flex items-center ${
+              stat.trendUp ? 'text-green-600' : 'text-red-600'
+            }`}>
+              {stat.trendUp ? (
+                <ArrowUpRight className="w-3 h-3 mr-0.5" />
+              ) : (
+                <ArrowDownRight className="w-3 h-3 mr-0.5" />
+              )}
+              {stat.trend}
+            </span>
+            <button className="p-1 hover:bg-gray-100 rounded-lg opacity-0 hover:opacity-100 transition-opacity">
+              <MoreVertical className="w-4 h-4 text-gray-400" />
+            </button>
+          </div>
+        </div>
+        
+        <p className="text-3xl font-bold text-gray-900 mb-1">{stat.value}</p>
+        <p className="text-sm text-gray-500 mb-3">{stat.label}</p>
+        
+        {/* Sparkline */}
+        <div className="mb-3">
+          <Sparkline data={stat.sparkline} color={stat.color} />
+        </div>
+        
+        <p className="text-xs text-gray-400">{stat.description}</p>
+        
+        {/* Quick stats */}
+        {isSelected && (
+          <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-3 gap-2">
+            {Object.entries(stat.details).map(([key, value]) => (
+              <div key={key} className="text-center">
+                <p className="text-xs text-gray-500 capitalize">{key}</p>
+                <p className="text-sm font-semibold text-gray-900">{value}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
       {/* Header */}
-      <div className="bg-white border-b">
-        <div className="max-w-7xl mx-auto px-4 py-4">
+      <div className="bg-white border-b border-gray-100 sticky top-16 z-30 shadow-sm">
+        <div className="max-w-7xl mx-auto px-6 py-6">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
-              <p className="text-gray-600">System overview and database management</p>
+              <h1 className="text-3xl font-bold text-gray-900 mb-2">Admin Dashboard</h1>
+              <p className="text-gray-600">System overview and management controls</p>
             </div>
             <div className="flex items-center space-x-3">
-              <select 
+              <select
                 value={selectedPeriod}
                 onChange={(e) => setSelectedPeriod(e.target.value)}
-                className="px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="px-4 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
                 <option value="today">Today</option>
                 <option value="week">This Week</option>
                 <option value="month">This Month</option>
                 <option value="year">This Year</option>
               </select>
-              <button className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center space-x-2">
+              <button 
+                onClick={() => setRefreshing(true)}
+                className="p-2 border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                <RefreshCw className={`w-5 h-5 text-gray-600 ${refreshing ? 'animate-spin' : ''}`} />
+              </button>
+              <button className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-md hover:shadow-lg flex items-center space-x-2">
                 <Download className="w-4 h-4" />
                 <span>Export Data</span>
               </button>
@@ -176,17 +298,22 @@ const AdminDashboard = () => {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 py-8">
+      <div className="max-w-7xl mx-auto px-6 py-8">
         {/* System Status Bar */}
-        <div className={`rounded-lg p-4 mb-6 ${
-          dbMetrics.status === 'healthy' 
-            ? 'bg-green-500 text-white' 
-            : 'bg-yellow-500 text-white'
-        }`}>
+        <div className={`rounded-2xl p-5 mb-8 text-white bg-gradient-to-r ${
+          dbMetrics.status === "healthy" 
+            ? "from-green-500 to-emerald-500" 
+            : "from-yellow-500 to-orange-500"
+        } shadow-lg`}>
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-3 h-3 bg-white rounded-full animate-pulse"></div>
-              <span className="font-semibold">System Status: All Services Operational</span>
+            <div className="flex items-center space-x-4">
+              <div className="p-3 bg-white/20 backdrop-blur-sm rounded-xl">
+                <Shield className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-lg">System Status: All Services Operational</h3>
+                <p className="text-white/80 text-sm mt-1">Last checked: just now • Uptime: {dbMetrics.uptime}</p>
+              </div>
             </div>
             <div className="flex items-center space-x-6 text-sm">
               <div className="flex items-center space-x-2">
@@ -199,75 +326,56 @@ const AdminDashboard = () => {
               </div>
               <div className="flex items-center space-x-2">
                 <Activity className="w-4 h-4" />
-                <span>{dbMetrics.uptime} uptime</span>
+                <span>{dbMetrics.avgQueryTime} avg</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          {stats.map((stat, idx) => {
-            const Icon = stat.icon;
-            return (
-              <div key={idx} className="bg-white rounded-lg shadow-sm border p-6">
-                <div className="flex items-center justify-between mb-2">
-                  <div className={`${stat.lightColor} p-3 rounded-lg`}>
-                    <Icon className={`w-5 h-5 ${stat.iconColor}`} />
-                  </div>
-                  <span className={`text-xs font-bold flex items-center ${
-                    stat.trendUp ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    <TrendingUp className={`w-3 h-3 mr-1 ${!stat.trendUp && 'rotate-180'}`} />
-                    {stat.trend}
-                  </span>
-                </div>
-                <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
-                <p className="text-sm text-gray-500">{stat.label}</p>
-                <p className="text-xs text-gray-400 mt-1">{stat.description}</p>
-              </div>
-            );
-          })}
+        {/* Stats Cards Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          {stats.map((stat, idx) => (
+            <StatCard key={idx} stat={stat} index={idx} />
+          ))}
         </div>
 
-        {/* Charts Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          {/* Monthly Submissions Chart */}
-          <div className="bg-white rounded-lg shadow-sm border p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-              <BarChart3 className="w-5 h-5 mr-2 text-indigo-600" />
-              Monthly Submissions
-            </h3>
-            <div className="relative h-64">
-              <div className="absolute left-0 h-full flex flex-col justify-between pb-8 text-xs text-gray-500">
-                <span>40K</span>
-                <span>30K</span>
-                <span>20K</span>
-                <span>10K</span>
-                <span>0</span>
+        {/* Main Content Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Charts Section */}
+          <div className="lg:col-span-2 space-y-8">
+            {/* Activity Chart */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-lg transition-shadow">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                  <BarChart3 className="w-5 h-5 mr-2 text-indigo-600" />
+                  Monthly Activity
+                </h3>
+                <div className="flex items-center gap-2">
+                  <button className="px-3 py-1 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">
+                    Users
+                  </button>
+                  <button className="px-3 py-1 text-sm bg-indigo-600 text-white rounded-lg">
+                    Campaigns
+                  </button>
+                  <button className="px-3 py-1 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">
+                    Revenue
+                  </button>
+                </div>
               </div>
               
-              <div className="ml-10 h-full pb-8 relative">
-                <div className="absolute inset-0 flex flex-col justify-between">
-                  <div className="border-t border-gray-200"></div>
-                  <div className="border-t border-gray-100"></div>
-                  <div className="border-t border-gray-100"></div>
-                  <div className="border-t border-gray-100"></div>
-                  <div className="border-t border-gray-200"></div>
-                </div>
-                
-                <div className="relative h-full flex items-end justify-around">
+              <div className="relative h-64">
+                <div className="absolute inset-0 flex items-end justify-around">
                   {monthlyData.map((item, idx) => (
-                    <div key={idx} className="flex-1 flex flex-col items-center mx-2 group">
+                    <div key={idx} className="flex-1 flex flex-col items-center mx-1 group">
                       <div className="relative w-full flex justify-center">
-                        <div 
-                          className="w-12 bg-gradient-to-t from-indigo-600 to-indigo-400 rounded-t hover:from-indigo-700 hover:to-indigo-500 transition-all cursor-pointer shadow-sm"
-                          style={{ 
-                            height: `${(item.submissions / 40000) * 192}px`
+                        <div
+                          className="w-12 bg-gradient-to-t from-indigo-600 to-indigo-400 rounded-t-lg hover:from-indigo-700 hover:to-indigo-500 transition-all cursor-pointer shadow-sm"
+                          style={{
+                            height: `${(item.campaigns / 3500) * 200}px`,
                           }}
                         >
                           <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
-                            {item.submissions.toLocaleString()} submissions
+                            {item.campaigns.toLocaleString()} campaigns
                           </div>
                         </div>
                       </div>
@@ -277,237 +385,217 @@ const AdminDashboard = () => {
                 </div>
               </div>
             </div>
-          </div>
 
-          {/* Form Types Distribution */}
-          <div className="bg-white rounded-lg shadow-sm border p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-              <Target className="w-5 h-5 mr-2 text-indigo-600" />
-              Form Types Distribution
-            </h3>
-            <div className="flex items-center justify-around">
-              <div className="relative">
-                <svg width="170" height="170" className="transform -rotate-90">
-                  {formTypes.map((item, idx) => {
-                    const path = createDonutPath(item.value, donutTotal, currentAngle);
-                    const pathElement = (
-                      <path
-                        key={idx}
-                        d={path}
-                        fill={item.color}
-                        className="hover:opacity-80 transition-opacity cursor-pointer"
-                        stroke="white"
-                        strokeWidth="2"
-                      />
-                    );
-                    currentAngle += (item.value / donutTotal) * 360;
-                    return pathElement;
-                  })}
-                </svg>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="text-center">
-                    <p className="text-3xl font-bold text-gray-900">{(donutTotal / 1000).toFixed(0)}K</p>
-                    <p className="text-sm text-gray-500">Total</p>
-                  </div>
-                </div>
+            {/* User Management Table */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-lg transition-shadow">
+              <div className="px-6 py-4 bg-gradient-to-r from-gray-50 to-white border-b border-gray-200 flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                  <Users className="w-5 h-5 mr-2 text-indigo-600" />
+                  User Management
+                </h3>
+                <button className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-xl hover:bg-indigo-700 transition-colors flex items-center gap-2">
+                  <Plus className="w-4 h-4" />
+                  Add User
+                </button>
               </div>
               
-              <div className="space-y-4">
-                {formTypes.map((item, idx) => (
-                  <div key={idx} className="flex items-center space-x-3">
-                    <div className="w-4 h-4 rounded" style={{ backgroundColor: item.color }}></div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">{item.label}</p>
-                      <p className="text-xs text-gray-500">{item.percentage}% • {(item.value / 1000).toFixed(1)}K</p>
-                    </div>
-                  </div>
-                ))}
+              <div className="overflow-x-auto">
+                <table className="min-w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Plan</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Activity</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Performance</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {users.map((user) => (
+                      <tr key={user.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <div className="h-10 w-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white font-semibold">
+                              {user.avatar}
+                            </div>
+                            <div className="ml-4">
+                              <div className="text-sm font-medium text-gray-900">{user.name}</div>
+                              <div className="text-xs text-gray-500">{user.email}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700">
+                            {user.plan}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                          <div>
+                            <p className="font-medium">{user.campaigns} campaigns</p>
+                            <p className="text-xs text-gray-500">{user.submissions.toLocaleString()} submissions</p>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <span className="text-sm font-medium text-gray-900">{user.successRate}%</span>
+                            <div className="ml-2 w-16 bg-gray-200 rounded-full h-2">
+                              <div
+                                className={`h-2 rounded-full ${
+                                  user.successRate >= 95 ? 'bg-green-500' :
+                                  user.successRate >= 90 ? 'bg-blue-500' : 'bg-yellow-500'
+                                }`}
+                                style={{ width: `${user.successRate}%` }}
+                              />
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full ${
+                            user.status === 'active' 
+                              ? 'bg-green-100 text-green-800' 
+                              : 'bg-gray-100 text-gray-800'
+                          }`}>
+                            <span className={`w-2 h-2 rounded-full mr-1.5 ${
+                              user.status === 'active' ? 'bg-green-500' : 'bg-gray-500'
+                            }`}></span>
+                            {user.status}
+                          </span>
+                          <p className="text-xs text-gray-500 mt-1">{user.lastActive}</p>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <div className="flex items-center space-x-2">
+                            <button className="text-indigo-600 hover:text-indigo-700">
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            <button className="text-gray-600 hover:text-gray-700">
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                            <button className="text-red-600 hover:text-red-700">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Weekly Activity Chart */}
-        <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <Activity className="w-5 h-5 mr-2 text-indigo-600" />
-            Weekly Activity
-          </h3>
-          <div className="relative h-64">
-            <div className="absolute left-0 h-full flex flex-col justify-between pb-8 text-xs text-gray-500">
-              <span>8K</span>
-              <span>6K</span>
-              <span>4K</span>
-              <span>2K</span>
-              <span>0</span>
-            </div>
-            
-            <div className="ml-10 h-full pb-8 relative">
-              <div className="absolute inset-0">
-                <div className="h-full flex flex-col justify-between">
-                  <div className="border-t border-gray-200"></div>
-                  <div className="border-t border-gray-100 border-dashed"></div>
-                  <div className="border-t border-gray-100 border-dashed"></div>
-                  <div className="border-t border-gray-100 border-dashed"></div>
-                  <div className="border-t border-gray-200"></div>
-                </div>
-              </div>
-              
-              <svg className="absolute inset-0 w-full h-full" viewBox="0 0 420 200">
-                <defs>
-                  <linearGradient id="adminLineGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <stop offset="0%" stopColor="#818CF8" stopOpacity="0.2" />
-                    <stop offset="100%" stopColor="#818CF8" stopOpacity="0" />
-                  </linearGradient>
-                </defs>
-                
-                {(() => {
-                  const chartWidth = 420;
-                  const chartHeight = 200;
-                  const points = weeklyActivity.map((item, idx) => {
-                    const x = (idx / (weeklyActivity.length - 1)) * chartWidth;
-                    const y = chartHeight - (item.submissions / 8000) * chartHeight;
-                    return `${x},${y}`;
-                  });
-                  
-                  const areaPath = `M ${points[0]} L ${points.join(' L ')} L ${chartWidth},${chartHeight} L 0,${chartHeight} Z`;
-                  
-                  return (
-                    <>
-                      <path d={areaPath} fill="url(#adminLineGradient)" />
-                      <polyline
-                        points={points.join(' ')}
-                        fill="none"
-                        stroke="#818CF8"
-                        strokeWidth="3"
-                        strokeLinejoin="round"
-                        strokeLinecap="round"
-                      />
-                      {weeklyActivity.map((item, idx) => {
-                        const x = (idx / (weeklyActivity.length - 1)) * chartWidth;
-                        const y = chartHeight - (item.submissions / 8000) * chartHeight;
-                        return (
-                          <g key={idx}>
-                            <circle cx={x} cy={y} r="5" fill="white" stroke="#818CF8" strokeWidth="3" />
-                            <circle cx={x} cy={y} r="12" fill="transparent" className="hover:fill-indigo-100 hover:fill-opacity-50 cursor-pointer" />
-                          </g>
-                        );
-                      })}
-                    </>
-                  );
-                })()}
-              </svg>
-              
-              <div className="absolute inset-0">
-                {weeklyActivity.map((item, idx) => {
-                  const x = (idx / (weeklyActivity.length - 1)) * 100;
-                  const y = 100 - (item.submissions / 8000) * 100;
+          {/* Right Sidebar */}
+          <div className="space-y-8">
+            {/* Recent Activity */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-lg transition-shadow">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                <Activity className="w-5 h-5 mr-2 text-indigo-600" />
+                Recent Activity
+              </h3>
+              <div className="space-y-3">
+                {recentActivity.map((activity, idx) => {
+                  const Icon = activity.icon;
                   return (
                     <div
                       key={idx}
-                      className="absolute group"
-                      style={{ 
-                        left: `${x}%`, 
-                        top: `${y}%`,
-                        width: '20px',
-                        height: '20px',
-                        transform: 'translate(-50%, -50%)'
-                      }}
+                      className="flex items-start space-x-3 p-3 rounded-xl hover:bg-gray-50 transition-colors border border-gray-100 hover:border-gray-200"
                     >
-                      <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-20">
-                        {item.submissions.toLocaleString()} submissions
+                      <div className={`p-2 rounded-lg ${activity.bgColor}`}>
+                        <Icon className={`w-4 h-4 ${activity.color}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-gray-900">{activity.message}</p>
+                          {activity.importance === 'high' && (
+                            <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">{activity.detail}</p>
+                        <p className="text-xs text-gray-400 mt-1">{activity.time}</p>
                       </div>
                     </div>
                   );
                 })}
               </div>
-              
-              <div className="absolute bottom-0 left-0 right-0 flex justify-between">
-                {weeklyActivity.map((item, idx) => (
-                  <span key={idx} className="text-sm text-gray-600">{item.day}</span>
-                ))}
-              </div>
+              <button className="w-full mt-4 px-4 py-2 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors text-sm font-medium">
+                View All Activity
+              </button>
             </div>
-          </div>
-        </div>
 
-        {/* Database Tables */}
-        <div className="bg-white rounded-lg shadow-sm border overflow-hidden mb-6">
-          <div className="px-6 py-4 bg-gray-50 border-b">
-            <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-              <Database className="w-5 h-5 mr-2 text-indigo-600" />
-              Database Tables
-            </h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Table</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Records</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Size</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Modified</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {tableInfo.map((table, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <div className={`w-2 h-2 rounded-full mr-3 ${
-                          table.status === 'optimal' ? 'bg-green-500' : 'bg-yellow-500'
-                        } animate-pulse`}></div>
-                        <span className="text-sm font-medium text-gray-900">{table.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                      {table.records.toLocaleString()}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{table.size}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <div className="flex items-center">
-                        <Clock className="w-3 h-3 mr-1" />
-                        {table.lastModified}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full ${
-                        table.status === 'optimal' 
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-yellow-100 text-yellow-800'
-                      }`}>
-                        {table.status === 'indexing' && <RefreshCw className="w-3 h-3 mr-1 animate-spin" />}
-                        {table.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <button className="text-indigo-600 hover:text-indigo-700 font-medium">View</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Recent Activity */}
-        <div className="bg-white rounded-lg shadow-sm border p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h3>
-          <div className="space-y-3">
-            {recentActivity.map((activity, idx) => {
-              const Icon = activity.icon;
-              return (
-                <div key={idx} className="flex items-start space-x-3 p-3 rounded-lg hover:bg-gray-50 transition-colors">
-                  <Icon className={`w-5 h-5 mt-0.5 ${activity.color}`} />
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-gray-900">{activity.message}</p>
-                    <p className="text-xs text-gray-500">{activity.time}</p>
+            {/* Database Health */}
+            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-2xl border border-indigo-200 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                <Database className="w-5 h-5 mr-2 text-indigo-600" />
+                Database Health
+              </h3>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">Cache Hit Rate</span>
+                  <div className="flex items-center gap-2">
+                    <div className="w-24 bg-gray-200 rounded-full h-2">
+                      <div
+                        className="h-2 rounded-full bg-gradient-to-r from-green-500 to-emerald-500"
+                        style={{ width: `${dbMetrics.cacheHitRate}%` }}
+                      />
+                    </div>
+                    <span className="text-sm font-semibold text-gray-900">{dbMetrics.cacheHitRate}%</span>
                   </div>
                 </div>
-              );
-            })}
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-white/70 backdrop-blur-sm rounded-xl p-3">
+                    <p className="text-xs text-gray-500">Tables</p>
+                    <p className="text-lg font-semibold text-gray-900">{dbMetrics.tables}</p>
+                  </div>
+                  <div className="bg-white/70 backdrop-blur-sm rounded-xl p-3">
+                    <p className="text-xs text-gray-500">Records</p>
+                    <p className="text-lg font-semibold text-gray-900">{dbMetrics.totalRecords}</p>
+                  </div>
+                  <div className="bg-white/70 backdrop-blur-sm rounded-xl p-3">
+                    <p className="text-xs text-gray-500">Query Time</p>
+                    <p className="text-lg font-semibold text-gray-900">{dbMetrics.avgQueryTime}</p>
+                  </div>
+                  <div className="bg-white/70 backdrop-blur-sm rounded-xl p-3">
+                    <p className="text-xs text-gray-500">Size</p>
+                    <p className="text-lg font-semibold text-gray-900">{dbMetrics.dbSize}</p>
+                  </div>
+                </div>
+                
+                <div className="pt-3 border-t border-indigo-200">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">Last Backup</span>
+                    <span className="font-medium text-gray-900">{dbMetrics.lastBackup}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm mt-2">
+                    <span className="text-gray-600">Next Maintenance</span>
+                    <span className="font-medium text-gray-900">{dbMetrics.nextMaintenance}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-lg transition-shadow">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <button className="p-3 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-700 text-sm font-medium transition-colors flex flex-col items-center gap-2">
+                  <Users className="w-5 h-5" />
+                  Manage Users
+                </button>
+                <button className="p-3 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-700 text-sm font-medium transition-colors flex flex-col items-center gap-2">
+                  <Settings className="w-5 h-5" />
+                  Settings
+                </button>
+                <button className="p-3 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-700 text-sm font-medium transition-colors flex flex-col items-center gap-2">
+                  <Database className="w-5 h-5" />
+                  Backup
+                </button>
+                <button className="p-3 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-700 text-sm font-medium transition-colors flex flex-col items-center gap-2">
+                  <Shield className="w-5 h-5" />
+                  Security
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

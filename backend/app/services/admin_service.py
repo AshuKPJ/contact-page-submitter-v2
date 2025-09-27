@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from app.models.user import User
 from app.models.campaign import Campaign
 from app.models.submission import Submission
-from app.models.settings_and_logs import SystemLog
+from app.models.logs import SystemLog  # Fixed import - now from logs module
 from app.schemas.admin import (
     SystemStatus,
     UserManagement,

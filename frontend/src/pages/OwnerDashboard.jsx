@@ -1,224 +1,714 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { 
   DollarSign, Users, TrendingUp, UserPlus, CreditCard, Shield, Activity, 
   Settings, Mail, Globe, AlertCircle, CheckCircle, Clock, FileText, 
   ChevronDown, MoreVertical, Eye, Edit, Pause, Play, RefreshCw, Zap,
-  BarChart3, Target, Calendar, Award, Briefcase, Send
+  BarChart3, Target, Calendar, Award, Briefcase, Send, Loader2, X
 } from "lucide-react";
 
 const OwnerDashboard = () => {
+  // Basic state
   const [selectedPeriod, setSelectedPeriod] = useState("month");
-  const [activeTab, setActiveTab] = useState("overview");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [showNotification, setShowNotification] = useState(false);
+  const [notificationMessage, setNotificationMessage] = useState('');
+  const [notificationType, setNotificationType] = useState('success');
   
-  // Enhanced stats
-  const stats = [
-    { 
-      label: "Total Revenue", 
-      value: "$48,200",
-      change: "+21.1%",
-      isPositive: true,
-      icon: DollarSign,
-      lightColor: "bg-green-100",
-      iconColor: "text-green-600",
-      description: "This month"
-    },
-    { 
-      label: "Active Users", 
-      value: "132",
-      change: "+15.8%",
-      isPositive: true,
-      icon: Users,
-      lightColor: "bg-blue-100",
-      iconColor: "text-blue-600",
-      description: "Paid accounts"
-    },
-    { 
-      label: "New Signups", 
-      value: "41",
-      change: "+41.4%",
-      isPositive: true,
-      icon: UserPlus,
-      lightColor: "bg-purple-100",
-      iconColor: "text-purple-600",
-      description: "Last 30 days"
-    },
-    { 
-      label: "Success Rate", 
-      value: "96.8%",
-      change: "+2.3%",
-      isPositive: true,
-      icon: Target,
-      lightColor: "bg-orange-100",
-      iconColor: "text-orange-600",
-      description: "Average rate"
-    },
-  ];
+  // Data state
+  const [stats, setStats] = useState([]);
+  const [revenueData, setRevenueData] = useState([]);
+  const [subscriptionData, setSubscriptionData] = useState([]);
+  const [teamMembers, setTeamMembers] = useState([]);
+  const [customerActivity, setCustomerActivity] = useState([]);
+  const [systemMetrics, setSystemMetrics] = useState({
+    totalCampaigns: 0,
+    activeCSVs: 0,
+    avgSuccessRate: 0,
+    totalSubmissions: "0",
+    serverLoad: 0
+  });
+  const [recentTransactions, setRecentTransactions] = useState([]);
+  const [campaigns, setCampaigns] = useState([]);
+  
+  // Team management state
+  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  const [showEditMemberModal, setShowEditMemberModal] = useState(false);
+  const [selectedMember, setSelectedMember] = useState(null);
+  const [newMemberData, setNewMemberData] = useState({
+    first_name: '',
+    last_name: '',
+    email: '',
+    role: 'user',
+    password: ''
+  });
 
-  // Revenue data
-  const revenueData = [
-    { month: 'Jan', revenue: 35000, users: 98 },
-    { month: 'Feb', revenue: 38000, users: 105 },
-    { month: 'Mar', revenue: 41000, users: 112 },
-    { month: 'Apr', revenue: 43000, users: 118 },
-    { month: 'May', revenue: 48200, users: 132 },
-  ];
+  // CRITICAL FIX: Add refs to prevent duplicate requests
+  const abortControllerRef = useRef(null);
+  const isLoadingRef = useRef(false);
+  const lastFetchTimeRef = useRef(0);
+  const mountedRef = useRef(true);
 
-  // Subscription distribution
-  const subscriptionData = [
-    { label: "Professional", value: 78, color: "#10B981", percentage: 59 },
-    { label: "Business", value: 42, color: "#F59E0B", percentage: 32 },
-    { label: "Enterprise", value: 12, color: "#EF4444", percentage: 9 },
-  ];
+  // API base URL
+  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8001';
 
-  // Team members
-  const teamMembers = [
-    {
-      id: 1,
-      name: "Tom Mack",
-      email: "tom@example.com",
-      role: "Admin",
-      region: "East Region",
-      status: "Active",
-      lastActive: "2 min ago",
-      customers: 45,
-      revenue: "$12,400",
-      performance: 98
-    },
-    {
-      id: 2,
-      name: "Kim Gregory",
-      email: "kim@example.com",
-      role: "Admin",
-      region: "Marketing",
-      status: "Active",
-      lastActive: "1 hour ago",
-      customers: 38,
-      revenue: "$9,800",
-      performance: 92
-    },
-    {
-      id: 3,
-      name: "Lisa Chen",
-      email: "lisa@example.com",
-      role: "Admin",
-      region: "West Region",
-      status: "Active",
-      lastActive: "30 min ago",
-      customers: 52,
-      revenue: "$14,200",
-      performance: 96
-    },
-  ];
+  // Cleanup on unmount
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
-  // Customer activity
-  const customerActivity = [
-    { hour: '00:00', submissions: 120 },
-    { hour: '04:00', submissions: 85 },
-    { hour: '08:00', submissions: 245 },
-    { hour: '12:00', submissions: 380 },
-    { hour: '16:00', submissions: 425 },
-    { hour: '20:00', submissions: 310 },
-  ];
+  // Helper function to show notifications
+  const displayNotification = useCallback((message, type = 'success') => {
+    if (!mountedRef.current) return;
+    setNotificationMessage(message);
+    setNotificationType(type);
+    setShowNotification(true);
+    setTimeout(() => {
+      if (mountedRef.current) {
+        setShowNotification(false);
+      }
+    }, 3000);
+  }, []);
 
-  // System metrics
-  const systemMetrics = {
-    totalCampaigns: 1847,
-    activeCSVs: 23,
-    avgSuccessRate: 96.8,
-    totalSubmissions: "2.4M",
-    serverLoad: 67
+  // FIXED API call function with request deduplication
+  const fetchAPI = useCallback(async (endpoint, options = {}) => {
+    const token = localStorage.getItem('access_token');
+    const fullUrl = `${API_BASE_URL}${endpoint}`;
+    
+    // Use the abort controller from the current request batch
+    const controller = abortControllerRef.current;
+    
+    console.log(`📡 API Call: ${fullUrl}`);
+    
+    try {
+      const response = await fetch(fullUrl, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+          ...options.headers
+        },
+        signal: controller?.signal // Add abort signal
+      });
+
+      console.log(`📡 Response Status: ${response.status} for ${endpoint}`);
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          console.error('🔒 Authentication failed');
+          localStorage.removeItem('access_token');
+          window.location.href = '/';
+          throw new Error('Authentication required');
+        }
+        throw new Error(`API Error: ${response.status} - ${response.statusText}`);
+      }
+
+      const text = await response.text();
+      console.log(`📦 Response Size: ${text.length} bytes for ${endpoint}`);
+      
+      if (!text) {
+        console.warn(`⚠️ Empty response from ${endpoint}`);
+        return null;
+      }
+
+      const jsonData = JSON.parse(text);
+      console.log(`✅ Parsed data for ${endpoint}:`, jsonData);
+      return jsonData;
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        console.log(`🛑 Request aborted: ${endpoint}`);
+        return null; // Don't throw for aborted requests
+      }
+      console.error(`❌ Error calling ${endpoint}:`, error);
+      throw error;
+    }
+  }, [API_BASE_URL]);
+
+  // Helper function to convert period to days
+  const getDaysFromPeriod = useCallback((period) => {
+    switch (period) {
+      case 'today': return 1;
+      case 'week': return 7;
+      case 'month': return 30;
+      case 'year': return 365;
+      default: return 30;
+    }
+  }, []);
+
+  // FIXED - Prevent duplicate requests with proper state management
+  const fetchDashboardData = useCallback(async (forceRefresh = false) => {
+    // Prevent duplicate requests
+    const now = Date.now();
+    const timeSinceLastFetch = now - lastFetchTimeRef.current;
+    
+    if (!forceRefresh && (isLoadingRef.current || timeSinceLastFetch < 1000)) {
+      console.log('🛑 Preventing duplicate request, last fetch was', timeSinceLastFetch, 'ms ago');
+      return;
+    }
+
+    // Cancel any ongoing requests
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Create new abort controller for this batch of requests
+    abortControllerRef.current = new AbortController();
+    
+    isLoadingRef.current = true;
+    lastFetchTimeRef.current = now;
+    
+    if (!mountedRef.current) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const days = getDaysFromPeriod(selectedPeriod);
+      console.log(`🔄 Fetching dashboard data for ${days} days (force: ${forceRefresh})`);
+      
+      // Step 1: Check if we have a token (no need for separate API call)
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        console.error('❌ No access token found');
+        if (mountedRef.current) {
+          setError('Authentication required. Please login again.');
+        }
+        return;
+      }
+
+      // Step 2: Try to fetch basic user data first
+      let analyticsData = null;
+      try {
+        console.log('📊 Fetching analytics data...');
+        analyticsData = await fetchAPI(`/api/analytics/user?include_detailed=true&days=${days}`);
+        if (!mountedRef.current) return;
+        console.log('📊 Analytics data received:', analyticsData);
+        
+        if (analyticsData?.error) {
+          console.warn('⚠️ Analytics returned error:', analyticsData.error_message);
+        }
+      } catch (error) {
+        if (!mountedRef.current) return;
+        console.error('❌ Analytics fetch failed:', error);
+        displayNotification('Failed to load analytics data: ' + error.message, 'error');
+      }
+
+      // Step 3: Fetch supporting data in parallel with proper error handling
+      const dataPromises = {
+        dailyStats: fetchAPI(`/api/analytics/daily-stats?days=${days}`)
+          .then(data => ({ success: true, data }))
+          .catch(error => ({ success: false, error: error?.message || 'Unknown error' })),
+        
+        performance: fetchAPI(`/api/analytics/performance?limit=10&time_range=${days}`)
+          .then(data => ({ success: true, data }))
+          .catch(error => ({ success: false, error: error?.message || 'Unknown error' })),
+        
+        campaigns: fetchAPI('/api/campaigns?limit=10')
+          .then(data => ({ success: true, data }))
+          .catch(error => ({ success: false, error: error?.message || 'Unknown error' })),
+        
+        users: fetchAPI('/api/admin/users?page=1&per_page=10')
+          .then(data => ({ success: true, data }))
+          .catch(error => ({ success: false, error: error?.message || 'Unknown error' })),
+        
+        revenue: fetchAPI(`/api/analytics/revenue?days=${days}`)
+          .then(data => ({ success: true, data }))
+          .catch(error => ({ success: false, error: error?.message || 'Unknown error' })),
+        
+        metrics: fetchAPI('/api/admin/metrics')
+          .then(data => ({ success: true, data }))
+          .catch(error => ({ success: false, error: error?.message || 'Unknown error' }))
+      };
+
+      const results = await Promise.allSettled(Object.values(dataPromises));
+      if (!mountedRef.current) return;
+      
+      const dataMap = {};
+      
+      Object.keys(dataPromises).forEach((key, index) => {
+        const result = results[index];
+        if (result.status === 'fulfilled' && result.value?.success) {
+          dataMap[key] = result.value.data;
+          console.log(`✅ ${key} data loaded:`, result.value.data);
+        } else {
+          console.warn(`⚠️ ${key} fetch failed:`, result.reason || result.value?.error);
+          dataMap[key] = null;
+        }
+      });
+
+      // BATCH STATE UPDATES to prevent multiple re-renders
+      const updates = {};
+
+      // Step 4: Process analytics data or set defaults
+      if (analyticsData && !analyticsData.error) {
+        const pricePerSubmission = dataMap.revenue?.price_per_submission || 0.5;
+        const totalRevenue = dataMap.revenue?.total_revenue || 
+                            ((analyticsData.successful_submissions || 0) * pricePerSubmission);
+        
+        const processedStats = [
+          { 
+            label: "Total Revenue", 
+            value: `$${totalRevenue.toFixed(2)}`,
+            change: dataMap.revenue?.revenue_change || "N/A",
+            isPositive: dataMap.revenue?.revenue_change?.startsWith('+') || null,
+            icon: DollarSign,
+            description: "From successful submissions"
+          },
+          { 
+            label: "Active Campaigns", 
+            value: String(analyticsData.active_campaigns || 0),
+            change: analyticsData.campaigns_count > 0 ? 
+                   `${((analyticsData.active_campaigns / analyticsData.campaigns_count) * 100).toFixed(1)}%` : 
+                   "0%",
+            isPositive: true,
+            icon: Users,
+            description: `Out of ${analyticsData.campaigns_count} total`
+          },
+          { 
+            label: "Total Submissions", 
+            value: String(analyticsData.total_submissions || 0),
+            change: dataMap.dailyStats?.summary?.change_from_previous || "N/A",
+            isPositive: dataMap.dailyStats?.summary?.change_from_previous?.startsWith('+') || null,
+            icon: UserPlus,
+            description: "All time"
+          },
+          { 
+            label: "Success Rate", 
+            value: `${(analyticsData.success_rate || 0).toFixed(1)}%`,
+            change: dataMap.revenue?.success_rate_change || "N/A",
+            isPositive: dataMap.revenue?.success_rate_change?.startsWith('+') || null,
+            icon: Target,
+            description: `${analyticsData.successful_submissions} successful out of ${analyticsData.total_submissions}`
+          }
+        ];
+        updates.stats = processedStats;
+
+        // Set system metrics
+        if (dataMap.metrics) {
+          updates.systemMetrics = {
+            totalCampaigns: dataMap.metrics.campaigns?.total || analyticsData.campaigns_count || 0,
+            activeCSVs: dataMap.metrics.campaigns?.active || analyticsData.active_campaigns || 0,
+            avgSuccessRate: dataMap.metrics.submissions?.success_rate || analyticsData.success_rate || 0,
+            totalSubmissions: formatNumber(dataMap.metrics.submissions?.total || analyticsData.total_submissions || 0),
+            serverLoad: dataMap.metrics.system?.query_time_ms ? 
+                       Math.min(100, Math.round(dataMap.metrics.system.query_time_ms / 10)) : 0
+          };
+        } else {
+          updates.systemMetrics = {
+            totalCampaigns: analyticsData.campaigns_count || 0,
+            activeCSVs: analyticsData.active_campaigns || 0,
+            avgSuccessRate: analyticsData.success_rate || 0,
+            totalSubmissions: formatNumber(analyticsData.total_submissions || 0),
+            serverLoad: 0
+          };
+        }
+      } else {
+        console.warn('⚠️ No analytics data available, setting defaults');
+        // Set default empty stats
+        const defaultStats = [
+          { label: "Total Revenue", value: "$0.00", change: "N/A", icon: DollarSign, description: "No data available" },
+          { label: "Active Campaigns", value: "0", change: "N/A", icon: Users, description: "No campaigns found" },
+          { label: "Total Submissions", value: "0", change: "N/A", icon: UserPlus, description: "No submissions yet" },
+          { label: "Success Rate", value: "0%", change: "N/A", icon: Target, description: "No data to calculate" }
+        ];
+        updates.stats = defaultStats;
+        
+        updates.systemMetrics = {
+          totalCampaigns: 0,
+          activeCSVs: 0,
+          avgSuccessRate: 0,
+          totalSubmissions: "0",
+          serverLoad: 0
+        };
+      }
+
+      // Process daily stats for charts
+      if (dataMap.dailyStats?.series?.length > 0) {
+        const pricePerSubmission = dataMap.revenue?.price_per_submission || 0.5;
+        const revenue = dataMap.dailyStats.series.map((day) => ({
+          month: new Date(day.day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          revenue: (day.success || 0) * pricePerSubmission,
+          submissions: day.total,
+          successful: day.success
+        }));
+        updates.revenueData = revenue;
+
+        const activity = dataMap.dailyStats.series.map(day => ({
+          hour: new Date(day.day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          submissions: day.total
+        }));
+        updates.customerActivity = activity;
+      } else {
+        updates.revenueData = [];
+        updates.customerActivity = [];
+      }
+
+      // Process campaigns data
+      if (dataMap.performance?.campaigns?.length > 0) {
+        const pricePerSubmission = dataMap.revenue?.price_per_submission || 0.5;
+        const transactions = dataMap.performance.campaigns.slice(0, 5).map((campaign) => ({
+          id: campaign.id,
+          customer: campaign.name || "Unnamed Campaign",
+          status: campaign.status || 'UNKNOWN',
+          amount: `$${((campaign.successful || 0) * pricePerSubmission).toFixed(2)}`,
+          date: campaign.created_at ? new Date(campaign.created_at).toLocaleDateString() : 'N/A',
+          urls: campaign.total_urls || 0
+        }));
+        updates.recentTransactions = transactions;
+        updates.campaigns = dataMap.performance.campaigns;
+      } else if (dataMap.campaigns && Array.isArray(dataMap.campaigns)) {
+        const pricePerSubmission = dataMap.revenue?.price_per_submission || 0.5;
+        const transactions = dataMap.campaigns.slice(0, 5).map((campaign) => ({
+          id: campaign.id,
+          customer: campaign.name || "Unnamed Campaign",
+          status: campaign.status || 'UNKNOWN',
+          amount: `$${((campaign.successful || 0) * pricePerSubmission).toFixed(2)}`,
+          date: campaign.created_at ? new Date(campaign.created_at).toLocaleDateString() : 'N/A',
+          urls: campaign.total_urls || 0
+        }));
+        updates.recentTransactions = transactions;
+        updates.campaigns = dataMap.campaigns;
+      } else {
+        updates.recentTransactions = [];
+        updates.campaigns = [];
+      }
+
+      // Process team members
+      if (dataMap.users?.users?.length > 0) {
+        const pricePerSubmission = dataMap.revenue?.price_per_submission || 0.5;
+        const processedTeamMembers = dataMap.users.users.map(user => ({
+          id: user.id,
+          name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Unknown User',
+          email: user.email,
+          role: user.role || 'user',
+          status: user.is_active ? 'Active' : 'Inactive',
+          isVerified: user.is_verified || false,
+          lastActive: user.stats?.last_activity || user.updated_at || null,
+          campaigns: user.stats?.campaigns || 0,
+          submissions: user.stats?.submissions || 0,
+          revenue: `$${((user.stats?.successful_submissions || 0) * pricePerSubmission).toFixed(2)}`,
+          performance: 0,
+          createdAt: user.created_at
+        }));
+        updates.teamMembers = processedTeamMembers;
+      } else {
+        updates.teamMembers = [];
+      }
+
+      // BATCH UPDATE ALL STATE AT ONCE
+      if (mountedRef.current) {
+        setStats(updates.stats || []);
+        setSystemMetrics(updates.systemMetrics || {});
+        setRevenueData(updates.revenueData || []);
+        setCustomerActivity(updates.customerActivity || []);
+        setRecentTransactions(updates.recentTransactions || []);
+        setCampaigns(updates.campaigns || []);
+        setTeamMembers(updates.teamMembers || []);
+      }
+
+      console.log('✅ Dashboard data loading completed');
+      
+    } catch (err) {
+      console.error('❌ Dashboard data loading failed:', err);
+      if (mountedRef.current) {
+        setError(`Failed to load dashboard data: ${err.message}`);
+        displayNotification('Failed to load dashboard data. Please try again.', 'error');
+      }
+    } finally {
+      isLoadingRef.current = false;
+      if (mountedRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [selectedPeriod, getDaysFromPeriod, fetchAPI, displayNotification]);
+
+  // OPTIMIZED useEffect - only fetch when necessary
+  useEffect(() => {
+    // Debug authentication state
+    const token = localStorage.getItem('access_token');
+    const userInfo = localStorage.getItem('user_info');
+    
+    console.log('🔍 Auth Debug:', {
+      hasToken: !!token,
+      tokenLength: token?.length,
+      tokenPreview: token?.substring(0, 20) + '...',
+      hasUserInfo: !!userInfo,
+      userInfo: userInfo ? JSON.parse(userInfo) : null,
+      apiBaseUrl: API_BASE_URL
+    });
+    
+    if (!token) {
+      console.error('❌ No access token found - user needs to login');
+      setError('Please login to view dashboard');
+      setLoading(false);
+      return;
+    }
+    
+    fetchDashboardData();
+  }, [selectedPeriod, fetchDashboardData]);
+
+  // FIXED: Manual refresh function
+  const handleRefresh = useCallback(() => {
+    fetchDashboardData(true); // Force refresh
+  }, [fetchDashboardData]);
+
+  const formatNumber = (num) => {
+    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
+    return String(num);
   };
 
-  // Recent transactions
-  const recentTransactions = [
-    { id: 1, customer: "Acme Corp", plan: "Professional", amount: "$149", date: "Today", status: "success" },
-    { id: 2, customer: "Tech Solutions", plan: "Business", amount: "$299", date: "Yesterday", status: "success" },
-    { id: 3, customer: "StartupXYZ", plan: "Professional", amount: "$149", date: "2 days ago", status: "pending" },
-    { id: 4, customer: "Global Inc", plan: "Enterprise", amount: "$599", date: "3 days ago", status: "success" },
-  ];
-
-  const maxRevenue = Math.max(...revenueData.map(d => d.revenue));
-  const maxActivity = Math.max(...customerActivity.map(d => d.submissions));
-
-  // Donut chart calculation
-  const createDonutPath = (value, total, startAngle) => {
-    const percentage = value / total;
-    const angle = percentage * 360;
-    const endAngle = startAngle + angle;
+  const formatDate = (dateString) => {
+    if (!dateString) return 'No activity';
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
     
-    const outerRadius = 70;
-    const innerRadius = 45;
-    const cx = 85;
-    const cy = 85;
-    
-    const x1 = cx + outerRadius * Math.cos((startAngle * Math.PI) / 180);
-    const y1 = cy + outerRadius * Math.sin((startAngle * Math.PI) / 180);
-    const x2 = cx + outerRadius * Math.cos((endAngle * Math.PI) / 180);
-    const y2 = cy + outerRadius * Math.sin((endAngle * Math.PI) / 180);
-    const x3 = cx + innerRadius * Math.cos((endAngle * Math.PI) / 180);
-    const y3 = cy + innerRadius * Math.sin((endAngle * Math.PI) / 180);
-    const x4 = cx + innerRadius * Math.cos((startAngle * Math.PI) / 180);
-    const y4 = cy + innerRadius * Math.sin((startAngle * Math.PI) / 180);
-    
-    const largeArcFlag = angle > 180 ? 1 : 0;
-    
-    return `M ${x1} ${y1} A ${outerRadius} ${outerRadius} 0 ${largeArcFlag} 1 ${x2} ${y2} L ${x3} ${y3} A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 0 ${x4} ${y4} Z`;
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} mins ago`;
+    if (diffHours < 24) return `${diffHours} hours ago`;
+    if (diffDays < 7) return `${diffDays} days ago`;
+    return date.toLocaleDateString();
   };
 
-  const donutTotal = subscriptionData.reduce((sum, item) => sum + item.value, 0);
-  let currentAngle = -90;
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin text-slate-600 mx-auto mb-4" />
+          <p className="text-slate-600">Loading dashboard data...</p>
+          <p className="text-slate-400 text-sm mt-2">API: {API_BASE_URL}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <div className="text-center bg-white rounded-lg shadow-sm border border-slate-200 p-8 max-w-md">
+          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-slate-800 mb-2">Error Loading Dashboard</h2>
+          <p className="text-slate-600 mb-4">{error}</p>
+          <button 
+            onClick={handleRefresh}
+            className="px-4 py-2 bg-slate-800 text-white rounded hover:bg-slate-700 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Get logged-in user's name from localStorage
+  const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+  const firstName = userInfo?.first_name || userInfo?.name?.split(' ')[0] || 'User';
+
+  // Get subtitle based on selected period
+  const getSubtitle = () => {
+    switch(selectedPeriod) {
+      case 'today': return "Here's what's happening with your business today";
+      case 'week': return "Your business performance this week";
+      case 'month': return "Your business overview this month";
+      case 'year': return "Your business performance this year";
+      default: return "Your business overview this month";
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Owner Dashboard</h1>
-              <p className="text-gray-600">Business overview and team management</p>
-            </div>
-            <div className="flex items-center space-x-3">
-              <select 
-                value={selectedPeriod}
-                onChange={(e) => setSelectedPeriod(e.target.value)}
-                className="px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+    <div className="min-h-screen bg-slate-100">
+      {/* Professional Notification Toast */}
+      {showNotification && (
+        <div className="fixed top-4 right-4 z-50 min-w-[320px] max-w-md">
+          <div className={`
+            bg-white border-l-4 rounded shadow-lg p-4 transform transition-all duration-300 border border-slate-200
+            ${showNotification ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'}
+            ${notificationType === 'success' ? 'border-l-green-600 bg-green-50' : 
+              notificationType === 'error' ? 'border-l-red-600 bg-red-50' : 'border-l-blue-600 bg-blue-50'}
+          `}>
+            <div className="flex items-start">
+              <div className={`
+                flex-shrink-0 w-8 h-8 rounded flex items-center justify-center mr-3
+                ${notificationType === 'success' ? 'bg-green-100' : 
+                  notificationType === 'error' ? 'bg-red-100' : 'bg-blue-100'}
+              `}>
+                {notificationType === 'success' && <CheckCircle className="w-5 h-5 text-green-600" />}
+                {notificationType === 'error' && <AlertCircle className="w-5 h-5 text-red-600" />}
+              </div>
+              <div className="flex-1">
+                <p className={`font-semibold text-sm
+                  ${notificationType === 'success' ? 'text-green-800' : 
+                    notificationType === 'error' ? 'text-red-800' : 'text-blue-800'}
+                `}>
+                  {notificationType === 'success' ? 'Success' : 'Error'}
+                </p>
+                <p className={`text-sm mt-1
+                  ${notificationType === 'success' ? 'text-green-700' : 
+                    notificationType === 'error' ? 'text-red-700' : 'text-blue-700'}
+                `}>
+                  {notificationMessage}
+                </p>
+              </div>
+              <button 
+                onClick={() => setShowNotification(false)}
+                className={`flex-shrink-0 ml-2 rounded p-1 hover:opacity-80 transition-opacity
+                  ${notificationType === 'success' ? 'text-green-600' : 
+                    notificationType === 'error' ? 'text-red-600' : 'text-blue-600'}
+                `}
               >
-                <option value="today">Today</option>
-                <option value="week">This Week</option>
-                <option value="month">This Month</option>
-                <option value="year">This Year</option>
-              </select>
-              <button className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center space-x-2">
-                <Settings className="w-4 h-4" />
-                <span>Settings</span>
+                <X className="w-4 h-4" />
               </button>
             </div>
           </div>
         </div>
-      </div>
-
+      )}
+      
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* System Health Bar */}
-        <div className="bg-green-500 rounded-lg p-4 mb-6 text-white">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-3 h-3 bg-white rounded-full animate-pulse"></div>
-              <span className="font-semibold">System Status: All Services Operational</span>
+        {/* Dashboard Top Section */}
+        <div className="bg-white rounded-2xl p-8 mb-6 text-slate-800 shadow-sm border border-slate-200">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* Left Side - Welcome & Quick Actions */}
+            <div>
+              <div className="flex items-center space-x-3 mb-4">
+                <div className="p-2 bg-slate-100 rounded-lg border border-slate-200">
+                  <BarChart3 className="w-6 h-6 text-slate-700" />
+                </div>
+                <div>
+                  <h1 className="text-2xl font-bold text-slate-800">
+                    Welcome back, {firstName}!
+                  </h1>
+                  <p className="text-slate-600 text-sm">
+                    {getSubtitle()}
+                  </p>
+                </div>
+              </div>
+              
+              {/* Time Period Selector */}
+              <div className="flex items-center space-x-3 mt-6">
+                <span className="text-slate-600 text-sm font-medium">Viewing:</span>
+                <div className="flex bg-slate-100 rounded-lg p-1 border border-slate-200">
+                  {['today', 'week', 'month', 'year'].map((period) => (
+                    <button
+                      key={period}
+                      onClick={() => setSelectedPeriod(period)}
+                      disabled={loading}
+                      className={`px-3 py-1 rounded text-sm font-medium transition-all ${
+                        selectedPeriod === period 
+                          ? 'bg-slate-800 text-white shadow-sm' 
+                          : 'text-slate-600 hover:bg-slate-200'
+                      } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      {period === 'today' ? 'Today' : 
+                       period === 'week' ? 'This Week' : 
+                       period === 'month' ? 'This Month' : 'This Year'}
+                    </button>
+                  ))}
+                </div>
+                <button 
+                  onClick={handleRefresh}
+                  disabled={loading}
+                  className={`p-2 bg-slate-100 border border-slate-200 rounded-lg hover:bg-slate-200 transition-colors ${
+                    loading ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
+                  title="Refresh data"
+                >
+                  <RefreshCw className={`w-4 h-4 text-slate-600 ${loading ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
             </div>
-            <div className="flex items-center space-x-6 text-sm">
-              <div className="flex items-center space-x-2">
-                <Activity className="w-4 h-4" />
-                <span>Load: {systemMetrics.serverLoad}%</span>
+            
+            {/* Right Side - Quick Stats */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                <div className="flex items-center justify-between mb-2">
+                  <DollarSign className="w-5 h-5 text-slate-600" />
+                  <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded font-medium">
+                    {stats[0]?.change !== "N/A" ? stats[0]?.change : "+0%"}
+                  </span>
+                </div>
+                <p className="text-2xl font-bold text-slate-800">{stats[0]?.value || "$0.00"}</p>
+                <p className="text-slate-600 text-xs mt-1 font-medium">Total Revenue</p>
               </div>
-              <div className="flex items-center space-x-2">
-                <FileText className="w-4 h-4" />
-                <span>{systemMetrics.activeCSVs} Active CSVs</span>
+              
+              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                <div className="flex items-center justify-between mb-2">
+                  <Activity className="w-5 h-5 text-slate-600" />
+                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">
+                    Active
+                  </span>
+                </div>
+                <p className="text-2xl font-bold text-slate-800">{systemMetrics.activeCSVs}</p>
+                <p className="text-slate-600 text-xs mt-1 font-medium">Running Campaigns</p>
               </div>
-              <div className="flex items-center space-x-2">
-                <Target className="w-4 h-4" />
-                <span>{systemMetrics.avgSuccessRate}% Success</span>
+              
+              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                <div className="flex items-center justify-between mb-2">
+                  <Target className="w-5 h-5 text-slate-600" />
+                  <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                    systemMetrics.avgSuccessRate > 50 
+                      ? 'bg-green-100 text-green-700' 
+                      : systemMetrics.avgSuccessRate > 0 
+                      ? 'bg-yellow-100 text-yellow-700'
+                      : 'bg-gray-100 text-gray-700'
+                  }`}>
+                    {systemMetrics.avgSuccessRate > 50 ? 'Good' : 
+                     systemMetrics.avgSuccessRate > 0 ? 'Needs Work' : 'No Data'}
+                  </span>
+                </div>
+                <p className="text-2xl font-bold text-slate-800">{systemMetrics.avgSuccessRate.toFixed(1)}%</p>
+                <p className="text-slate-600 text-xs mt-1 font-medium">Success Rate</p>
               </div>
+              
+              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                <div className="flex items-center justify-between mb-2">
+                  <Users className="w-5 h-5 text-slate-600" />
+                  <span className="text-xs bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-medium">
+                    Team
+                  </span>
+                </div>
+                <p className="text-2xl font-bold text-slate-800">{teamMembers.length}</p>
+                <p className="text-slate-600 text-xs mt-1 font-medium">Active Users</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* System Health Bar */}
+        <div className={`rounded-lg p-4 mb-6 text-white flex items-center justify-between border ${
+          systemMetrics.avgSuccessRate > 50 ? 'bg-green-600 border-green-700' : 
+          systemMetrics.avgSuccessRate > 0 ? 'bg-yellow-600 border-yellow-700' :
+          'bg-slate-600 border-slate-700'
+        }`}>
+          <div className="flex items-center space-x-3">
+            <div className="w-3 h-3 bg-white rounded-full animate-pulse"></div>
+            <span className="font-semibold">
+              System Status: {systemMetrics.avgSuccessRate > 50 ? 'All Services Operational' : 
+                              systemMetrics.avgSuccessRate > 0 ? 'Performance Issues Detected' :
+                              'No Data Available'}
+            </span>
+          </div>
+          <div className="flex items-center space-x-6 text-sm">
+            <div className="flex items-center space-x-2">
+              <Activity className="w-4 h-4" />
+              <span>Load: {systemMetrics.serverLoad || '0'}%</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <FileText className="w-4 h-4" />
+              <span>{systemMetrics.activeCSVs} Active Campaigns</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Target className="w-4 h-4" />
+              <span>{systemMetrics.avgSuccessRate.toFixed(1)}% Success</span>
             </div>
           </div>
         </div>
@@ -227,315 +717,77 @@ const OwnerDashboard = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           {stats.map((stat, idx) => {
             const Icon = stat.icon;
+            const borderColors = ['border-green-500', 'border-blue-500', 'border-purple-500', 'border-orange-500'];
+            const iconColors = ['bg-green-50 text-green-600', 'bg-blue-50 text-blue-600', 'bg-purple-50 text-purple-600', 'bg-orange-50 text-orange-600'];
+            const changeColors = ['text-green-600', 'text-blue-600', 'text-purple-600', 'text-orange-600'];
+            
             return (
-              <div key={idx} className="bg-white rounded-lg shadow-sm border p-6">
+              <div key={idx} className={`bg-white rounded-lg shadow-sm border-l-4 ${borderColors[idx]} p-6 hover:shadow-md transition-all`}>
                 <div className="flex items-center justify-between mb-2">
-                  <div className={`${stat.lightColor} p-3 rounded-lg`}>
-                    <Icon className={`w-5 h-5 ${stat.iconColor}`} />
+                  <div className={`${iconColors[idx]} p-3 rounded`}>
+                    <Icon className="w-5 h-5" />
                   </div>
-                  <span className={`text-xs font-bold flex items-center ${
-                    stat.isPositive ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    <TrendingUp className={`w-3 h-3 mr-1 ${!stat.isPositive && 'rotate-180'}`} />
-                    {stat.change}
-                  </span>
+                  {stat.change !== "N/A" && (
+                    <span className={`text-xs font-semibold flex items-center ${
+                      stat.isPositive ? changeColors[idx] : stat.isPositive === false ? 'text-red-600' : 'text-slate-600'
+                    }`}>
+                      {stat.isPositive !== null && (
+                        <TrendingUp className={`w-3 h-3 mr-1 ${!stat.isPositive && 'rotate-180'}`} />
+                      )}
+                      {stat.change}
+                    </span>
+                  )}
                 </div>
-                <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
-                <p className="text-sm text-gray-500">{stat.label}</p>
-                <p className="text-xs text-gray-400 mt-1">{stat.description}</p>
+                <p className="text-2xl font-bold text-slate-800">{stat.value}</p>
+                <p className="text-sm text-slate-600 font-medium">{stat.label}</p>
+                <p className="text-xs text-slate-500 mt-1">{stat.description}</p>
               </div>
             );
           })}
         </div>
 
-        {/* Charts Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          {/* Revenue Chart */}
-          <div className="bg-white rounded-lg shadow-sm border p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-              <DollarSign className="w-5 h-5 mr-2 text-purple-600" />
-              Revenue Growth
-            </h3>
-            <div className="relative h-64">
-              <div className="absolute left-0 h-full flex flex-col justify-between pb-8 text-xs text-gray-500">
-                <span>$50K</span>
-                <span>$40K</span>
-                <span>$30K</span>
-                <span>$20K</span>
-                <span>$10K</span>
-              </div>
-              
-              <div className="ml-12 h-full pb-8 relative">
-                <div className="absolute inset-0 flex flex-col justify-between">
-                  <div className="border-t border-gray-200"></div>
-                  <div className="border-t border-gray-100"></div>
-                  <div className="border-t border-gray-100"></div>
-                  <div className="border-t border-gray-100"></div>
-                  <div className="border-t border-gray-200"></div>
-                </div>
-                
-                <svg className="absolute inset-0 w-full h-full" viewBox="0 0 380 200">
-                  <defs>
-                    <linearGradient id="revenueGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                      <stop offset="0%" stopColor="#A855F7" stopOpacity="0.3" />
-                      <stop offset="100%" stopColor="#A855F7" stopOpacity="0" />
-                    </linearGradient>
-                  </defs>
-                  
-                  {(() => {
-                    const chartWidth = 380;
-                    const chartHeight = 200;
-                    const points = revenueData.map((item, idx) => {
-                      const x = (idx / (revenueData.length - 1)) * chartWidth;
-                      const y = chartHeight - (item.revenue / 50000) * chartHeight;
-                      return `${x},${y}`;
-                    });
-                    
-                    const areaPath = `M ${points[0]} L ${points.join(' L ')} L ${chartWidth},${chartHeight} L 0,${chartHeight} Z`;
-                    
-                    return (
-                      <>
-                        <path d={areaPath} fill="url(#revenueGradient)" />
-                        <polyline
-                          points={points.join(' ')}
-                          fill="none"
-                          stroke="#A855F7"
-                          strokeWidth="3"
-                          strokeLinejoin="round"
-                          strokeLinecap="round"
-                        />
-                        {revenueData.map((item, idx) => {
-                          const x = (idx / (revenueData.length - 1)) * chartWidth;
-                          const y = chartHeight - (item.revenue / 50000) * chartHeight;
-                          return (
-                            <circle key={idx} cx={x} cy={y} r="5" fill="white" stroke="#A855F7" strokeWidth="3" />
-                          );
-                        })}
-                      </>
-                    );
-                  })()}
-                </svg>
-                
-                <div className="absolute bottom-0 left-0 right-0 flex justify-between">
-                  {revenueData.map((item, idx) => (
-                    <span key={idx} className="text-sm text-gray-600">{item.month}</span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Subscription Distribution */}
-          <div className="bg-white rounded-lg shadow-sm border p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-              <Award className="w-5 h-5 mr-2 text-purple-600" />
-              Plan Distribution
-            </h3>
-            <div className="flex items-center justify-around">
-              <div className="relative">
-                <svg width="170" height="170" className="transform -rotate-90">
-                  {subscriptionData.map((item, idx) => {
-                    const path = createDonutPath(item.value, donutTotal, currentAngle);
-                    const pathElement = (
-                      <path
-                        key={idx}
-                        d={path}
-                        fill={item.color}
-                        className="hover:opacity-80 transition-opacity cursor-pointer"
-                        stroke="white"
-                        strokeWidth="2"
-                      />
-                    );
-                    currentAngle += (item.value / donutTotal) * 360;
-                    return pathElement;
-                  })}
-                </svg>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="text-center">
-                    <p className="text-3xl font-bold text-gray-900">{donutTotal}</p>
-                    <p className="text-sm text-gray-500">Users</p>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="space-y-4">
-                {subscriptionData.map((item, idx) => (
-                  <div key={idx} className="flex items-center space-x-3">
-                    <div className="w-4 h-4 rounded" style={{ backgroundColor: item.color }}></div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">{item.label}</p>
-                      <p className="text-xs text-gray-500">{item.percentage}% • {item.value} users</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Customer Activity Chart */}
-        <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <Activity className="w-5 h-5 mr-2 text-purple-600" />
-            Customer Activity (24h)
-          </h3>
-          <div className="relative h-48">
-            <div className="absolute left-0 h-full flex flex-col justify-between pb-8 text-xs text-gray-500">
-              <span>500</span>
-              <span>400</span>
-              <span>300</span>
-              <span>200</span>
-              <span>100</span>
-              <span>0</span>
-            </div>
-            
-            <div className="ml-10 h-full pb-8 relative">
-              <div className="absolute inset-0 flex flex-col justify-between">
-                <div className="border-t border-gray-200"></div>
-                <div className="border-t border-gray-100"></div>
-                <div className="border-t border-gray-100"></div>
-                <div className="border-t border-gray-100"></div>
-                <div className="border-t border-gray-100"></div>
-                <div className="border-t border-gray-200"></div>
-              </div>
-              
-              <div className="relative h-full flex items-end justify-around">
-                {customerActivity.map((item, idx) => (
-                  <div key={idx} className="flex-1 flex flex-col items-center mx-2 group">
-                    <div className="relative w-full flex justify-center">
-                      <div 
-                        className="w-12 bg-gradient-to-t from-purple-600 to-purple-400 rounded-t hover:from-purple-700 hover:to-purple-500 transition-all cursor-pointer shadow-sm"
-                        style={{ 
-                          height: `${(item.submissions / 500) * 160}px`
-                        }}
-                      >
-                        <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
-                          {item.submissions} submissions
-                        </div>
-                      </div>
-                    </div>
-                    <span className="text-sm text-gray-600 mt-2">{item.hour}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Team Members Table */}
-        <div className="bg-white rounded-lg shadow-sm border overflow-hidden mb-6">
-          <div className="px-6 py-4 bg-gray-50 border-b flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-              <Users className="w-5 h-5 mr-2 text-purple-600" />
-              Team Performance
-            </h3>
-            <button className="px-3 py-1.5 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors">
-              Add Member
-            </button>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Member</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customers</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Performance</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {teamMembers.map((member) => (
-                  <tr key={member.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <div className="h-10 w-10 rounded-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center text-white font-semibold">
-                          {member.name.split(' ').map(n => n[0]).join('')}
-                        </div>
-                        <div className="ml-4">
-                          <div className="text-sm font-medium text-gray-900">{member.name}</div>
-                          <div className="text-xs text-gray-500">{member.email}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{member.role}</div>
-                      <div className="text-xs text-gray-500">{member.region}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                      {member.customers}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                      {member.revenue}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <span className="text-sm font-medium text-gray-900">{member.performance}%</span>
-                        <div className="ml-2 w-16 bg-gray-200 rounded-full h-2">
-                          <div 
-                            className={`h-2 rounded-full ${
-                              member.performance >= 95 ? 'bg-green-500' : 
-                              member.performance >= 90 ? 'bg-blue-500' : 'bg-yellow-500'
-                            }`}
-                            style={{ width: `${member.performance}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                        <span className="w-2 h-2 bg-green-500 rounded-full mr-1.5"></span>
-                        {member.status}
-                      </span>
-                      <p className="text-xs text-gray-500 mt-1">{member.lastActive}</p>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <div className="flex items-center space-x-2">
-                        <button className="text-purple-600 hover:text-purple-700">
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button className="text-gray-600 hover:text-gray-700">
-                          <Edit className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Recent Transactions */}
-        <div className="bg-white rounded-lg shadow-sm border p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <CreditCard className="w-5 h-5 mr-2 text-purple-600" />
-            Recent Transactions
+        {/* Recent Campaigns */}
+        <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+          <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center">
+            <CreditCard className="w-5 h-5 mr-2 text-slate-600" />
+            Recent Campaign Activity
           </h3>
           <div className="space-y-3">
-            {recentTransactions.map((transaction) => (
-              <div key={transaction.id} className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition-colors">
-                <div className="flex items-center space-x-3">
-                  <div className={`w-2 h-2 rounded-full ${
-                    transaction.status === 'success' ? 'bg-green-500' : 'bg-yellow-500'
-                  }`}></div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">{transaction.customer}</p>
-                    <p className="text-xs text-gray-500">{transaction.plan} Plan • {transaction.date}</p>
+            {recentTransactions.length > 0 ? (
+              recentTransactions.map((transaction) => (
+                <div key={transaction.id} className="flex items-center justify-between p-3 rounded border border-slate-200 hover:bg-slate-50 transition-colors">
+                  <div className="flex items-center space-x-3">
+                    <div className={`w-2 h-2 rounded-full ${
+                      transaction.status === 'COMPLETED' || transaction.status === 'completed' ? 'bg-green-500' : 
+                      transaction.status === 'FAILED' || transaction.status === 'failed' ? 'bg-red-500' :
+                      transaction.status === 'PROCESSING' || transaction.status === 'ACTIVE' ? 'bg-yellow-500' :
+                      'bg-slate-500'
+                    }`}></div>
+                    <div>
+                      <p className="text-sm font-medium text-slate-800">{transaction.customer}</p>
+                      <p className="text-xs text-slate-500 font-medium">{transaction.urls} URLs • {transaction.date}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-slate-800">{transaction.amount}</p>
+                    <p className={`text-xs font-medium ${
+                      transaction.status === 'COMPLETED' || transaction.status === 'completed' ? 'text-green-600' : 
+                      transaction.status === 'FAILED' || transaction.status === 'failed' ? 'text-red-600' :
+                      transaction.status === 'PROCESSING' || transaction.status === 'ACTIVE' ? 'text-yellow-600' :
+                      'text-slate-600'
+                    }`}>
+                      {transaction.status}
+                    </p>
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-sm font-bold text-gray-900">{transaction.amount}</p>
-                  <p className={`text-xs ${
-                    transaction.status === 'success' ? 'text-green-600' : 'text-yellow-600'
-                  }`}>
-                    {transaction.status}
-                  </p>
-                </div>
+              ))
+            ) : (
+              <div className="text-center py-8">
+                <FileText className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <p className="text-sm text-slate-500">No recent campaign activity</p>
+                <p className="text-xs text-slate-400 mt-1">Create a campaign to see activity here</p>
               </div>
-            ))}
+            )}
           </div>
         </div>
       </div>

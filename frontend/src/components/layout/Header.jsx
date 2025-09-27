@@ -1,212 +1,428 @@
-// src/components/layout/Header.jsx
-import React, { useState, useEffect } from "react";
+// src/components/layout/Header.jsx - Fixed Version (No styled-jsx)
+import React, { useState, useEffect, useRef } from "react";
 import { 
-  User, LogOut, ChevronDown, LayoutDashboard, 
-  UserCircle, Rocket, Settings, Activity
+  ChevronDown, Bell, Menu, X, Zap, LogOut,
+  LayoutDashboard, Rocket, BarChart3, HelpCircle, 
+  Settings, Shield, Users, UserCircle, Crown
 } from "lucide-react";
 import useAuth from "../../hooks/useAuth";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, Link } from "react-router-dom";
+import toast from 'react-hot-toast';
 
 const Header = () => {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+  
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const userMenuRef = useRef(null);
   
-  // Navigation items based on user role
-  const getNavItems = () => {
-    if (!user) return [];
-    
-    const baseItems = [
-      { 
-        id: "dashboard",
-        name: "Dashboard", 
-        href: "/dashboard",
-        icon: LayoutDashboard
-      },
-      { 
-        id: "profile",
-        name: "Contact Info", 
-        href: "/ContactInformationForm",
-        icon: UserCircle
+  // Handle scroll effect
+  useEffect(() => {
+    const handleScroll = () => {
+      setScrolled(window.scrollY > 10);
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+  
+  // Close user menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
+        setUserMenuOpen(false);
       }
-    ];
-    
-    // Only show "Start Campaign" for regular users
-    if (user.role === "user") {
-      baseItems.push({ 
-        id: "campaign",
-        name: "Start Campaign", 
-        href: "/form-submitter",
-        icon: Rocket
-      });
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Logout handler
+  const handleLogout = async () => {
+    try {
+      setUserMenuOpen(false);
+      setMobileMenuOpen(false);
+      await logout();
+      toast.success('Signed out successfully');
+    } catch (error) {
+      console.error('Logout error:', error);
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('user_id');
+      navigate('/');
+      toast.success('Signed out');
     }
-    
-    return baseItems;
   };
 
-  const navItems = getNavItems();
-
-  // Check if a nav item is active based on current URL
-  const isActive = (href) => {
-    return location.pathname === href;
+  // User display functions
+  const getUserDisplayName = () => {
+    if (user?.first_name && user?.last_name) {
+      return `${user.first_name} ${user.last_name}`;
+    }
+    if (user?.first_name) return user.first_name;
+    if (user?.email) return user.email.split('@')[0];
+    return 'User';
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate("/");
+  const getUserInitials = () => {
+    if (user?.first_name && user?.last_name) {
+      return `${user.first_name[0]}${user.last_name[0]}`.toUpperCase();
+    }
+    if (user?.first_name) return user.first_name[0].toUpperCase();
+    if (user?.email) return user.email[0].toUpperCase();
+    return 'U';
   };
 
+  const getUserRole = () => {
+    const role = user?.role;
+    if (typeof role === 'object' && role?.value) {
+      return role.value;
+    }
+    return role || 'user';
+  };
+
+  const getRoleInfo = () => {
+    const role = getUserRole().toLowerCase();
+    switch (role) {
+      case 'owner':
+        return { 
+          label: 'Owner', 
+          bgColor: 'bg-gradient-to-r from-yellow-100 to-orange-100', 
+          textColor: 'text-yellow-800',
+          icon: Crown 
+        };
+      case 'admin':
+        return { 
+          label: 'Admin', 
+          bgColor: 'bg-gradient-to-r from-red-100 to-pink-100', 
+          textColor: 'text-red-800',
+          icon: Shield 
+        };
+      default:
+        return { 
+          label: 'User', 
+          bgColor: 'bg-gradient-to-r from-indigo-100 to-blue-100', 
+          textColor: 'text-indigo-800',
+          icon: UserCircle 
+        };
+    }
+  };
+
+  // Guest header (not logged in)
   if (!user) {
     return (
-      <header className="fixed top-0 left-0 right-0 z-50 bg-white border-b border-blue-100 shadow-sm">
+      <header className={`fixed top-0 z-50 w-full transition-all duration-300 ${
+        scrolled 
+          ? 'bg-white/95 backdrop-blur-md shadow-lg border-b border-gray-200/50' 
+          : 'bg-white border-b border-gray-200'
+      }`}>
         <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-20">
-            {/* <a href="/" className="flex items-center">
+          <div className="flex justify-between items-center h-16">
+            <Link to="/" className="flex items-center space-x-2 group">
               <img
-                className="h-16 w-auto"
-                alt="Contact Page Submitter"
+                className="h-8 w-auto transition-transform duration-300 group-hover:scale-105"
+                alt="CPS"
                 src="/assets/images/CPS_Header_Logo.png"
+                onError={(e) => {
+                  e.target.style.display = 'none';
+                  e.target.nextSibling.style.display = 'flex';
+                }}
               />
-            </a> */}
+              <div className="hidden items-center space-x-2" style={{ display: 'none' }}>
+                <div className="w-8 h-8 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-lg flex items-center justify-center shadow-lg">
+                  <Zap className="w-5 h-5 text-white" />
+                </div>
+                <span className="text-xl font-semibold text-gray-900">CPS</span>
+              </div>
+            </Link>
+            
+            <div className="flex items-center space-x-4">
+              <Link 
+                to="/login" 
+                className="text-gray-600 hover:text-gray-900 font-medium transition-colors"
+              >
+                Sign In
+              </Link>
+              <Link 
+                to="/register" 
+                className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-5 py-2 rounded-lg hover:from-indigo-700 hover:to-purple-700 font-medium transition-all duration-300 transform hover:scale-105 shadow-lg"
+              >
+                Get Started
+              </Link>
+            </div>
           </div>
         </nav>
       </header>
     );
   }
 
-  return (
-    <header className="fixed top-0 left-0 right-0 z-50 bg-white border-b border-blue-100 shadow-sm">
-      <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-20">
-          {/* Logo */}
-          {/* <a href="/" className="flex items-center">
-            <img
-              className="h-16 w-auto"
-              alt="Contact Page Submitter"
-              src="/assets/images/CPS_Header_Logo.png"
-            />
-          </a> */}
+  const roleInfo = getRoleInfo();
+  const isAdmin = getUserRole().toLowerCase() === 'admin' || getUserRole().toLowerCase() === 'owner';
 
-          {/* Navigation Tabs */}
-          <div className="hidden md:flex items-center">
-            <div className="flex items-center space-x-2 bg-blue-50/50 rounded-full p-1">
+  // Main navigation items - only what you actually have
+  const navItems = [
+    { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+    { to: '/campaigns', icon: Rocket, label: 'Campaigns' },
+    { to: '/reports', icon: BarChart3, label: 'Reports' },
+    { to: '/help', icon: HelpCircle, label: 'Help' },
+  ];
+
+  return (
+    <header className={`fixed top-0 z-50 w-full transition-all duration-300 ${
+      scrolled 
+        ? 'bg-white/95 backdrop-blur-md shadow-lg border-b border-gray-200/50' 
+        : 'bg-white border-b border-gray-200'
+    }`}>
+      <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-between items-center h-16">
+          {/* Logo */}
+          <div className="flex items-center space-x-8">
+            <Link to="/dashboard" className="flex items-center space-x-2 group">
+              <img
+                className="h-8 w-auto transition-transform duration-300 group-hover:scale-105"
+                alt="CPS"
+                src="/assets/images/CPS_Header_Logo.png"
+                onError={(e) => {
+                  e.target.style.display = 'none';
+                  e.target.nextSibling.style.display = 'flex';
+                }}
+              />
+              <div className="hidden items-center space-x-2" style={{ display: 'none' }}>
+                <div className="w-8 h-8 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-lg flex items-center justify-center shadow-lg">
+                  <Zap className="w-5 h-5 text-white" />
+                </div>
+                <span className="text-xl font-semibold text-gray-900">CPS</span>
+              </div>
+            </Link>
+
+            {/* Simple Navigation */}
+            <nav className="hidden lg:flex items-center space-x-1">
               {navItems.map((item) => {
                 const Icon = item.icon;
-                const active = isActive(item.href);
-                
                 return (
-                  <a
-                    key={item.id}
-                    href={item.href}
-                    className={`flex items-center space-x-2 px-4 py-2 rounded-full transition-all duration-300 ${
-                      active 
-                        ? 'bg-blue-600 text-white shadow-md' 
-                        : 'text-blue-700 hover:bg-blue-100'
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
+                      location.pathname === item.to
+                        ? 'text-indigo-600 bg-indigo-50'
+                        : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
                     }`}
                   >
-                    <Icon className={`w-4 h-4 ${
-                      active ? 'text-white' : 'text-blue-600'
-                    }`} />
-                    <span className="font-medium text-sm">{item.name}</span>
-                  </a>
+                    <Icon className="w-4 h-4" />
+                    <span>{item.label}</span>
+                  </Link>
                 );
               })}
-            </div>
+              
+              {/* Admin-only link */}
+              {isAdmin && (
+                <Link
+                  to="/user-management"
+                  className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
+                    location.pathname === '/user-management'
+                      ? 'text-red-600 bg-red-50'
+                      : 'text-gray-700 hover:text-red-600 hover:bg-red-50'
+                  }`}
+                >
+                  <Users className="w-4 h-4" />
+                  <span>Users</span>
+                </Link>
+              )}
+            </nav>
           </div>
 
-          {/* User Menu */}
-          <div className="relative">
-            <button
-              onClick={() => setUserMenuOpen(!userMenuOpen)}
-              className="flex items-center space-x-2 px-3 py-2 rounded-lg hover:bg-blue-50 transition-all duration-200 border border-blue-200"
+          {/* Right Section */}
+          <div className="flex items-center space-x-3">
+            {/* Notifications */}
+            <Link 
+              to="/notifications"
+              className="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
             >
-              {/* User Avatar */}
-              <div className="h-8 w-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-semibold">
-                {user.first_name?.[0]}{user.last_name?.[0]}
-              </div>
-              
-              {/* User Info */}
-              <div className="hidden sm:block text-left">
-                <p className="text-sm font-semibold text-gray-900">
-                  {user.first_name} {user.last_name}
-                </p>
-                <p className="text-xs text-blue-600">{user.role}</p>
-              </div>
-              
-              <ChevronDown className={`h-4 w-4 text-blue-600 transition-transform duration-200 ${
-                userMenuOpen ? "rotate-180" : ""
-              }`} />
-            </button>
+              <Bell className="w-5 h-5" />
+              <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+            </Link>
 
-            {/* Dropdown Menu */}
-            {userMenuOpen && (
-              <>
-                {/* Backdrop */}
-                <div 
-                  className="fixed inset-0 z-40" 
-                  onClick={() => setUserMenuOpen(false)}
-                ></div>
-                
-                {/* Menu */}
-                <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-xl border border-blue-100 overflow-hidden z-50">
-                  {/* User Header */}
-                  <div className="px-4 py-3 bg-blue-50 border-b border-blue-100">
-                    <div className="flex items-center space-x-3">
-                      <div className="h-10 w-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-semibold">
-                        {user.first_name?.[0]}{user.last_name?.[0]}
+            {/* User Menu */}
+            <div className="relative" ref={userMenuRef}>
+              <button
+                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                className="flex items-center space-x-2 p-2 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <div className="relative">
+                  <div className="h-8 w-8 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 text-white flex items-center justify-center text-sm font-medium shadow-sm">
+                    {getUserInitials()}
+                  </div>
+                  {getUserRole() === 'owner' && (
+                    <div className="absolute -top-1 -right-1 w-4 h-4 bg-gradient-to-r from-yellow-400 to-orange-400 rounded-full flex items-center justify-center">
+                      <Crown className="w-2.5 h-2.5 text-white" />
+                    </div>
+                  )}
+                  {getUserRole() === 'admin' && (
+                    <div className="absolute -top-1 -right-1 w-4 h-4 bg-gradient-to-r from-red-400 to-pink-400 rounded-full flex items-center justify-center">
+                      <Shield className="w-2.5 h-2.5 text-white" />
+                    </div>
+                  )}
+                </div>
+                <span className="hidden sm:block text-sm font-medium text-gray-700 max-w-[120px] truncate">
+                  {getUserDisplayName()}
+                </span>
+                <ChevronDown className={`h-4 w-4 text-gray-500 transition-transform ${
+                  userMenuOpen ? "rotate-180" : ""
+                }`} />
+              </button>
+
+              {userMenuOpen && (
+                <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 opacity-0 animate-slideDown">
+                  <div className="p-4 border-b border-gray-200">
+                    <p className="font-medium text-gray-900">{getUserDisplayName()}</p>
+                    <p className="text-sm text-gray-500 truncate">{user.email}</p>
+                    <div className="flex items-center gap-2 mt-2">
+                      <div className={`inline-flex items-center space-x-1 px-2 py-1 rounded text-xs font-medium ${roleInfo.bgColor} ${roleInfo.textColor}`}>
+                        <roleInfo.icon className="w-3 h-3" />
+                        <span>{roleInfo.label}</span>
                       </div>
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900">
-                          {user.first_name} {user.last_name}
-                        </p>
-                        <p className="text-xs text-gray-600">{user.email}</p>
-                      </div>
+                      {user?.is_verified && (
+                        <span className="inline-block px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded">
+                          Verified
+                        </span>
+                      )}
                     </div>
                   </div>
                   
-                  {/* Menu Items */}
-                  <div className="py-1">
-                    <a
-                      href="/ContactInformationForm"
-                      className="flex items-center space-x-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 transition-colors"
+                  <div className="py-2">
+                    <Link
+                      to="/contact-info"
+                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                      onClick={() => setUserMenuOpen(false)}
                     >
-                      <User className="h-4 w-4 text-blue-600" />
-                      <span>Profile Settings</span>
-                    </a>
-                    <a
-                      href="/dashboard"
-                      className="flex items-center space-x-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 transition-colors"
+                      <div className="flex items-center space-x-3">
+                        <UserCircle className="w-4 h-4 text-gray-400" />
+                        <span>Profile</span>
+                      </div>
+                    </Link>
+                    
+                    <Link
+                      to="/settings"
+                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                      onClick={() => setUserMenuOpen(false)}
                     >
-                      <Activity className="h-4 w-4 text-blue-600" />
-                      <span>View Activity</span>
-                    </a>
-                    {(user.role === "admin" || user.role === "owner") && (
-                      <a
-                        href={user.role === "owner" ? "/owner" : "/admin"}
-                        className="flex items-center space-x-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 transition-colors"
+                      <div className="flex items-center space-x-3">
+                        <Settings className="w-4 h-4 text-gray-400" />
+                        <span>Settings</span>
+                      </div>
+                    </Link>
+
+                    {isAdmin && (
+                      <Link
+                        to="/user-management"
+                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        onClick={() => setUserMenuOpen(false)}
                       >
-                        <Settings className="h-4 w-4 text-blue-600" />
-                        <span>Admin Settings</span>
-                      </a>
+                        <div className="flex items-center space-x-3">
+                          <Users className="w-4 h-4 text-gray-400" />
+                          <span>Manage Users</span>
+                        </div>
+                      </Link>
                     )}
+                    
+                    <Link
+                      to="/notifications"
+                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                      onClick={() => setUserMenuOpen(false)}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <Bell className="w-4 h-4 text-gray-400" />
+                        <span>Notifications</span>
+                      </div>
+                    </Link>
+                    
+                    <Link
+                      to="/help"
+                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                      onClick={() => setUserMenuOpen(false)}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <HelpCircle className="w-4 h-4 text-gray-400" />
+                        <span>Help</span>
+                      </div>
+                    </Link>
                   </div>
                   
-                  {/* Logout */}
-                  <div className="border-t border-blue-100">
+                  <div className="border-t border-gray-200">
                     <button
                       onClick={handleLogout}
-                      className="w-full flex items-center space-x-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                      className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
                     >
-                      <LogOut className="h-4 w-4" />
-                      <span>Logout</span>
+                      <div className="flex items-center space-x-3">
+                        <LogOut className="w-4 h-4" />
+                        <span>Sign Out</span>
+                      </div>
                     </button>
                   </div>
                 </div>
-              </>
-            )}
+              )}
+            </div>
+
+            {/* Mobile Menu Toggle */}
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="lg:hidden p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
+            >
+              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
           </div>
         </div>
+
+        {/* Mobile Menu */}
+        {mobileMenuOpen && (
+          <div className="lg:hidden border-t border-gray-200 py-4 opacity-0 animate-slideDown">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className={`flex items-center space-x-3 px-4 py-2 text-sm font-medium rounded-lg transition-colors mx-2 my-1 ${
+                    location.pathname === item.to
+                      ? 'text-indigo-600 bg-indigo-50'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+
+            {isAdmin && (
+              <Link
+                to="/user-management"
+                className={`flex items-center space-x-3 px-4 py-2 text-sm font-medium rounded-lg transition-colors mx-2 my-1 ${
+                  location.pathname === '/user-management'
+                    ? 'text-red-600 bg-red-50'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <Users className="w-4 h-4" />
+                <span>Manage Users</span>
+              </Link>
+            )}
+
+            <div className="border-t border-gray-200 mt-4 pt-4 mx-2">
+              <button
+                onClick={handleLogout}
+                className="w-full flex items-center space-x-3 px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Sign Out</span>
+              </button>
+            </div>
+          </div>
+        )}
       </nav>
     </header>
   );

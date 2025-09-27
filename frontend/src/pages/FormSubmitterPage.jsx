@@ -1,468 +1,567 @@
-// src/pages/FormSubmitterPage.jsx - Fixed CSV Reading
-import React, { useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+// src/pages/FormSubmitterPage.jsx - Complete Fixed Version
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
-  Upload, FileText, CheckCircle, Loader, X, AlertCircle, 
-  ArrowRight, Clock, Globe, Mail, Zap, Target, Activity,
-  ChevronRight, Database, Shield, TrendingUp
+  Upload, FileText, Send, AlertCircle, CheckCircle2, 
+  ArrowLeft, Target, Globe, Clock, BarChart3, X
 } from 'lucide-react';
+import { toast } from 'react-hot-toast';
+import apiService from '../services/api';
 
 const FormSubmitterPage = () => {
   const navigate = useNavigate();
-  const [csvFile, setCsvFile] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
-  const [csvPreview, setCsvPreview] = useState(null);
-  const [campaignActive, setCampaignActive] = useState(false);
-  const [parseError, setParseError] = useState(null);
-  const fileInputRef = useRef(null);
+  const [searchParams] = useSearchParams();
+  const editId = searchParams.get('edit');
+  const cloneId = searchParams.get('clone');
+  
+  const [formData, setFormData] = useState({
+    campaign_name: '',
+    csv_file: null,
+    csv_filename: '',
+    message_template: '',
+    form_selector: '',
+    fallback_email: '',
+    max_retries: 3,
+    proxy_rotation: true,
+    captcha_solving: true,
+    delay_between_submissions: 5
+  });
 
-  const handleDrag = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [validationErrors, setValidationErrors] = useState({});
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(false);
+  const [processingCampaignId, setProcessingCampaignId] = useState(null);
+  const [campaignStatus, setCampaignStatus] = useState(null);
+  const [statusCheckErrors, setStatusCheckErrors] = useState(0);
+
+  // Load campaign data if editing or cloning
+  useEffect(() => {
+    if (editId || cloneId) {
+      loadCampaignData(editId || cloneId);
     }
-  };
+  }, [editId, cloneId]);
 
-  const handleDrop = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
+  // Enhanced status polling with error recovery
+  useEffect(() => {
+    let statusInterval = null;
     
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFile(e.dataTransfer.files[0]);
+    if (processingCampaignId && !campaignStatus?.is_complete) {
+      statusInterval = setInterval(async () => {
+        try {
+          console.log(`Checking status for campaign ${processingCampaignId}`);
+          const status = await apiService.getCampaignStatus(processingCampaignId);
+          console.log('Campaign status:', status);
+          
+          setCampaignStatus(status);
+          setStatusCheckErrors(0); // Reset error counter on success
+          
+          // Handle completion states
+          if (status.is_complete) {
+            clearInterval(statusInterval);
+            setProcessingCampaignId(null);
+            
+            if (status.status === 'COMPLETED') {
+              setSuccess(true);
+              toast.success('Campaign completed successfully!');
+              setTimeout(() => {
+                navigate(`/campaigns/${processingCampaignId}`);
+              }, 2000);
+            } else if (status.status === 'FAILED') {
+              const errorMsg = status.error_message || 'Campaign processing failed';
+              setError(errorMsg);
+              toast.error(errorMsg);
+            } else if (status.status === 'STOPPED') {
+              toast.info('Campaign was stopped');
+              navigate(`/campaigns/${processingCampaignId}`);
+            }
+          }
+        } catch (err) {
+          console.error('Status check error:', err);
+          setStatusCheckErrors(prev => prev + 1);
+          
+          // Stop polling after too many errors
+          if (statusCheckErrors >= 10) {
+            clearInterval(statusInterval);
+            setError('Lost connection to campaign processing. Please check campaign list.');
+            toast.error('Connection lost. Please check campaign status manually.');
+          }
+        }
+      }, 2000); // Poll every 2 seconds
     }
-  };
-
-  const parseCSV = (text) => {
-    const lines = text.trim().split('\n');
-    if (lines.length === 0) return null;
-
-    // Get headers from first line
-    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
     
-    // Check if 'website' column exists
-    const websiteIndex = headers.findIndex(h => 
-      h.toLowerCase().includes('website') || 
-      h.toLowerCase().includes('url') ||
-      h.toLowerCase().includes('domain')
-    );
-
-    if (websiteIndex === -1) {
-      throw new Error("CSV must contain a 'website', 'url', or 'domain' column");
-    }
-
-    // Parse data rows
-    const rows = [];
-    for (let i = 1; i < Math.min(lines.length, 6); i++) { // Show first 5 rows
-      const columns = lines[i].split(',').map(c => c.trim().replace(/"/g, ''));
-      if (columns[websiteIndex] && columns[websiteIndex].length > 0) {
-        rows.push(columns);
+    return () => {
+      if (statusInterval) {
+        clearInterval(statusInterval);
       }
-    }
-
-    return {
-      headers,
-      rows,
-      totalRows: Math.max(0, lines.length - 1), // Total rows minus header
-      websiteColumnIndex: websiteIndex,
-      websiteColumnName: headers[websiteIndex]
     };
-  };
+  }, [processingCampaignId, campaignStatus?.is_complete, statusCheckErrors, navigate]);
 
-  const handleFile = async (file) => {
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      setParseError('Please select a CSV file');
-      return;
-    }
-    
-    if (file.size > 10 * 1024 * 1024) {
-      setParseError('File size must be less than 10MB');
-      return;
-    }
-    
-    setParseError(null);
-    setCsvFile(file);
-    
+  const loadCampaignData = async (campaignId) => {
     try {
-      // Read the file content
-      const text = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target.result);
-        reader.onerror = (e) => reject(new Error('Failed to read file'));
-        reader.readAsText(file);
+      const campaign = await apiService.getCampaign(campaignId);
+      setFormData({
+        ...formData,
+        campaign_name: cloneId ? `${campaign.name} (Copy)` : campaign.name,
+        message_template: campaign.message || '',
+        form_selector: campaign.settings?.form_selector || '',
+        fallback_email: campaign.settings?.fallback_email || '',
+        max_retries: campaign.settings?.max_retries || 3,
+        proxy_rotation: campaign.settings?.proxy_rotation !== false,
+        captcha_solving: campaign.settings?.captcha_solving !== false,
+        delay_between_submissions: campaign.settings?.delay_between_submissions || 5
       });
-
-      // Parse CSV content
-      const parsedData = parseCSV(text);
-      
-      if (!parsedData) {
-        throw new Error('Failed to parse CSV file');
-      }
-
-      setCsvPreview(parsedData);
-      
-    } catch (error) {
-      console.error('Error parsing CSV:', error);
-      setParseError(error.message || 'Failed to parse CSV file');
-      setCsvFile(null);
-      setCsvPreview(null);
+    } catch (err) {
+      console.error('Error loading campaign:', err);
+      toast.error('Failed to load campaign data');
+      setError('Failed to load campaign data');
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setIsSubmitting(true);
+    setError(null);
+    setSuccess(false);
+    setValidationErrors({});
     
-    if (!csvFile) {
-      alert('Please select a CSV file');
+    // Validate form
+    const errors = {};
+    if (!formData.campaign_name.trim()) {
+      errors.campaign_name = 'Campaign name is required';
+    }
+    if (!editId && !formData.csv_file) {
+      errors.csv_file = 'CSV file is required';
+    }
+    if (!formData.message_template.trim()) {
+      errors.message_template = 'Message template is required';
+    }
+    
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      setIsSubmitting(false);
       return;
     }
     
-    setSubmitting(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      setSubmitting(false);
-      setCampaignActive(true);
-      // Redirect to dashboard after starting
-      setTimeout(() => {
-        navigate('/dashboard');
-      }, 2000);
-    }, 2000);
-  };
-
-  const clearFile = () => {
-    setCsvFile(null);
-    setCsvPreview(null);
-    setParseError(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+    try {
+      if (editId) {
+        // Update existing campaign
+        await apiService.updateCampaign(editId, {
+          name: formData.campaign_name,
+          message: formData.message_template,
+          settings: {
+            form_selector: formData.form_selector,
+            fallback_email: formData.fallback_email,
+            max_retries: formData.max_retries,
+            proxy_rotation: formData.proxy_rotation,
+            captcha_solving: formData.captcha_solving,
+            delay_between_submissions: formData.delay_between_submissions
+          }
+        });
+        
+        toast.success('Campaign updated successfully');
+        navigate(`/campaigns/${editId}`);
+      } else {
+        // Create new campaign
+        console.log('Starting campaign with CSV...');
+        const result = await apiService.startCampaignWithCSV(formData.csv_file, {
+          name: formData.campaign_name,
+          message: formData.message_template,
+          proxy: formData.proxy_rotation ? 'enabled' : '',
+          use_captcha: formData.captcha_solving,
+          settings: {
+            form_selector: formData.form_selector,
+            fallback_email: formData.fallback_email,
+            max_retries: formData.max_retries,
+            proxy_rotation: formData.proxy_rotation,
+            captcha_solving: formData.captcha_solving,
+            delay_between_submissions: formData.delay_between_submissions
+          }
+        });
+        
+        console.log('Campaign start result:', result);
+        
+        if (result.success && result.campaign_id) {
+          setProcessingCampaignId(result.campaign_id);
+          setCampaignStatus({
+            campaign_id: result.campaign_id,
+            total: result.total_urls || 0,
+            processed: 0,
+            successful: 0,
+            failed: 0,
+            status: 'PROCESSING',
+            progress_percent: 0,
+            is_complete: false
+          });
+          setUploadProgress(100);
+          toast.success(`Campaign started with ${result.total_urls} URLs`);
+        } else {
+          throw new Error(result.message || result.detail || 'Failed to start campaign');
+        }
+      }
+    } catch (err) {
+      console.error('Error starting campaign:', err);
+      const errorMessage = err.response?.data?.detail || err.message || 'Failed to start campaign';
+      setError(errorMessage);
+      toast.error(errorMessage);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const getEstimatedTime = () => {
-    if (!csvPreview) return null;
-    const hours = Math.ceil(csvPreview.totalRows / 120);
-    if (hours < 1) return "Less than 1 hour";
-    return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      // Validate file type
+      if (!file.name.toLowerCase().endsWith('.csv')) {
+        setValidationErrors({ ...validationErrors, csv_file: 'File must be a CSV' });
+        toast.error('Please select a CSV file');
+        return;
+      }
+      
+      // Validate file size
+      if (file.size > 10 * 1024 * 1024) {
+        setValidationErrors({ ...validationErrors, csv_file: 'File size must be less than 10MB' });
+        toast.error('File size must be less than 10MB');
+        return;
+      }
+      
+      setFormData({
+        ...formData,
+        csv_file: file,
+        csv_filename: file.name
+      });
+      setValidationErrors({ ...validationErrors, csv_file: null });
+      
+      // Simulate upload progress
+      setUploadProgress(0);
+      let progress = 0;
+      const interval = setInterval(() => {
+        progress += 20;
+        setUploadProgress(progress);
+        if (progress >= 100) {
+          clearInterval(interval);
+          toast.success('File uploaded successfully');
+        }
+      }, 100);
+    }
   };
 
-  const stats = [
-    { icon: Zap, label: "Processing Speed", value: "120/hour", color: "text-yellow-600" },
-    { icon: Target, label: "Success Rate", value: "97%", color: "text-green-600" },
-    { icon: Mail, label: "Email Fallback", value: "Enabled", color: "text-blue-600" },
-    { icon: Shield, label: "CAPTCHA Solving", value: "Active", color: "text-purple-600" }
-  ];
-
-  const steps = [
-    { title: "Upload CSV", description: "Add your website list" },
-    { title: "Validation", description: "We verify your data" },
-    { title: "Processing", description: "Forms are submitted" },
-    { title: "Complete", description: "Download report" }
-  ];
+  const getStatusColor = (status) => {
+    const colors = {
+      'PROCESSING': 'text-blue-700 bg-blue-100',
+      'RUNNING': 'text-green-700 bg-green-100',
+      'COMPLETED': 'text-green-700 bg-green-100',
+      'FAILED': 'text-red-700 bg-red-100',
+      'STOPPED': 'text-gray-700 bg-gray-100',
+      'PAUSED': 'text-yellow-700 bg-yellow-100'
+    };
+    return colors[status] || 'text-gray-700 bg-gray-100';
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b">
-        <div className="max-w-7xl mx-auto px-4 py-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Start New Campaign</h1>
-              <p className="text-gray-600 mt-1">Upload your CSV file to begin automated outreach</p>
-            </div>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
+      {/* Header Navigation */}
+      <div className="max-w-7xl mx-auto mb-8">
+        <div className="flex items-center justify-between bg-white rounded-xl shadow-sm p-4">
+          <div className="flex items-center gap-4">
             <button
-              onClick={() => navigate('/dashboard')}
+              onClick={() => navigate('/campaigns')}
+              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              <span>Back to Campaigns</span>
+            </button>
+            <div className="h-6 w-px bg-gray-300" />
+            <h1 className="text-2xl font-bold text-gray-900">
+              {editId ? 'Edit Campaign' : cloneId ? 'Clone Campaign' : 'Create New Campaign'}
+            </h1>
+          </div>
+          
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate('/campaigns')}
               className="px-4 py-2 text-gray-600 hover:text-gray-900 transition-colors"
             >
-              Back to Dashboard
+              View All Campaigns
+            </button>
+            <button
+              onClick={() => navigate('/reports')}
+              className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              <BarChart3 className="w-4 h-4" />
+              Analytics
             </button>
           </div>
         </div>
       </div>
 
-      {/* Success Notification */}
-      {campaignActive && (
-        <div className="max-w-7xl mx-auto px-4 mt-6">
-          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-            <div className="flex items-center">
-              <CheckCircle className="w-5 h-5 text-green-600 mr-3" />
-              <div className="flex-1">
-                <p className="font-semibold text-green-900">Campaign Started Successfully!</p>
-                <p className="text-sm text-green-700">Redirecting to dashboard...</p>
+      {/* Success Alert */}
+      {success && (
+        <div className="max-w-4xl mx-auto mb-6">
+          <div className="bg-green-50 border border-green-200 rounded-xl p-6">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 className="w-6 h-6 text-green-600 flex-shrink-0" />
+              <div>
+                <h3 className="font-semibold text-green-900">Campaign Completed Successfully!</h3>
+                <p className="text-green-700">Redirecting to campaign details...</p>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Progress Steps */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            {steps.map((step, idx) => (
-              <div key={idx} className="flex-1 flex items-center">
-                <div className="flex flex-col items-center">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                    idx === 0 ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-500'
-                  }`}>
-                    {idx + 1}
-                  </div>
-                  <p className="text-sm font-medium text-gray-900 mt-2">{step.title}</p>
-                  <p className="text-xs text-gray-500">{step.description}</p>
-                </div>
-                {idx < steps.length - 1 && (
-                  <ChevronRight className="w-5 h-5 text-gray-300 mx-4 flex-shrink-0" />
-                )}
+      {/* Campaign Processing Status */}
+      {campaignStatus && !success && (
+        <div className="max-w-4xl mx-auto mb-6">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-blue-900">Campaign Processing</h3>
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(campaignStatus.status)}`}>
+                {campaignStatus.status}
+              </span>
+            </div>
+            
+            <div className="grid grid-cols-4 gap-4 mb-4">
+              <div>
+                <p className="text-sm text-blue-600">Total URLs</p>
+                <p className="text-2xl font-bold text-blue-900">{campaignStatus.total || 0}</p>
               </div>
-            ))}
+              <div>
+                <p className="text-sm text-blue-600">Processed</p>
+                <p className="text-2xl font-bold text-blue-900">{campaignStatus.processed || 0}</p>
+              </div>
+              <div>
+                <p className="text-sm text-green-600">Successful</p>
+                <p className="text-2xl font-bold text-green-700">{campaignStatus.successful || 0}</p>
+              </div>
+              <div>
+                <p className="text-sm text-red-600">Failed</p>
+                <p className="text-2xl font-bold text-red-700">{campaignStatus.failed || 0}</p>
+              </div>
+            </div>
+            
+            <div className="w-full bg-blue-100 rounded-full h-4 overflow-hidden">
+              <div 
+                className="bg-gradient-to-r from-blue-500 to-blue-600 h-4 rounded-full transition-all duration-500 ease-out"
+                style={{ width: `${Math.min(campaignStatus.progress_percent || 0, 100)}%` }}
+              />
+            </div>
+            
+            <div className="mt-3 text-sm text-blue-700">
+              Processing {campaignStatus.processed || 0} of {campaignStatus.total || 0} URLs 
+              ({Math.round(campaignStatus.progress_percent || 0)}% complete)
+            </div>
           </div>
         </div>
+      )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Main Upload Section */}
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-lg shadow-sm border">
-              {/* Upload Area */}
-              <div className="p-8">
-                <div
-                  onDragEnter={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDragOver={handleDrag}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`relative rounded-lg border-2 border-dashed transition-all cursor-pointer ${
-                    dragActive 
-                      ? 'border-indigo-500 bg-indigo-50' 
-                      : csvFile 
-                        ? 'border-green-500 bg-green-50' 
-                        : 'border-gray-300 bg-gray-50 hover:border-gray-400'
-                  }`}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".csv"
-                    onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-                    className="hidden"
-                  />
-                  
-                  <div className="p-8 text-center">
-                    {csvFile ? (
-                      <>
-                        <FileText className="w-16 h-16 text-green-600 mx-auto mb-4" />
-                        <p className="text-lg font-semibold text-gray-900">{csvFile.name}</p>
-                        <p className="text-sm text-gray-500 mt-1">
-                          {(csvFile.size / 1024).toFixed(2)} KB • {csvPreview?.totalRows || 0} websites
-                        </p>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            clearFile();
-                          }}
-                          className="mt-4 text-sm text-red-600 hover:text-red-700 font-medium flex items-center mx-auto"
-                        >
-                          <X className="w-4 h-4 mr-1" />
-                          Remove file
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                        <p className="text-lg font-medium text-gray-900">
-                          Drop your CSV file here, or click to browse
-                        </p>
-                        <p className="text-sm text-gray-500 mt-2">
-                          Supports CSV files up to 10MB
-                        </p>
-                      </>
-                    )}
-                  </div>
-                </div>
+      {/* Error Alert */}
+      {error && (
+        <div className="max-w-4xl mx-auto mb-6">
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+                <p className="text-red-700">{error}</p>
+              </div>
+              <button 
+                onClick={() => setError(null)}
+                className="text-red-600 hover:text-red-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-                {/* Error Display */}
-                {parseError && (
-                  <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-                    <div className="flex items-center">
-                      <AlertCircle className="w-5 h-5 text-red-600 mr-3" />
-                      <div>
-                        <p className="font-semibold text-red-900">Error parsing CSV</p>
-                        <p className="text-sm text-red-700">{parseError}</p>
-                      </div>
-                    </div>
-                  </div>
+      {/* Main Form Container */}
+      <div className="max-w-4xl mx-auto">
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Campaign Details Card */}
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <Target className="w-6 h-6 text-blue-600" />
+              <h2 className="text-xl font-semibold text-gray-900">Campaign Details</h2>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Campaign Name *
+                </label>
+                <input
+                  type="text"
+                  value={formData.campaign_name}
+                  onChange={(e) => setFormData({...formData, campaign_name: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                  placeholder="e.g., Q1 2025 Outreach Campaign"
+                  required
+                />
+                {validationErrors.campaign_name && (
+                  <p className="mt-1 text-sm text-red-600">{validationErrors.campaign_name}</p>
                 )}
-
-                {/* File Requirements */}
-                <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-                  <h3 className="text-sm font-semibold text-blue-900 mb-2">File Requirements</h3>
-                  <ul className="text-sm text-blue-700 space-y-1">
-                    <li className="flex items-center">
-                      <CheckCircle className="w-4 h-4 mr-2" />
-                      CSV format with 'website', 'url', or 'domain' column
-                    </li>
-                    <li className="flex items-center">
-                      <CheckCircle className="w-4 h-4 mr-2" />
-                      One URL per row (https://example.com)
-                    </li>
-                    <li className="flex items-center">
-                      <CheckCircle className="w-4 h-4 mr-2" />
-                      Maximum file size: 10MB
-                    </li>
-                  </ul>
-                </div>
               </div>
 
-              {/* Preview Section */}
-              {csvPreview && (
-                <div className="p-8 border-t">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Preview</h3>
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="min-w-full">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">
-                            {csvPreview.websiteColumnName} ({csvPreview.totalRows} total)
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {csvPreview.rows.map((row, idx) => (
-                          <tr key={idx}>
-                            <td className="px-4 py-3 text-sm text-gray-600">
-                              <Globe className="w-4 h-4 inline mr-2 text-gray-400" />
-                              {row[csvPreview.websiteColumnIndex]}
-                            </td>
-                          </tr>
-                        ))}
-                        {csvPreview.totalRows > csvPreview.rows.length && (
-                          <tr className="bg-gray-50">
-                            <td className="px-4 py-3 text-sm text-gray-500 italic">
-                              ... and {csvPreview.totalRows - csvPreview.rows.length} more websites
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="mt-6 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-600">
-                        Estimated processing time: 
-                        <span className="font-semibold text-gray-900 ml-1">{getEstimatedTime()}</span>
-                      </p>
-                    </div>
-                    <button
-                      onClick={handleSubmit}
-                      disabled={submitting}
-                      className={`px-6 py-3 rounded-lg font-semibold transition-all flex items-center ${
-                        submitting
-                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                          : 'bg-indigo-600 text-white hover:bg-indigo-700'
-                      }`}
+              {/* Only show file upload for new campaigns */}
+              {!editId && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Upload CSV File *
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="file"
+                      accept=".csv"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                      id="csv-upload"
+                      required={!editId}
+                    />
+                    <label
+                      htmlFor="csv-upload"
+                      className="flex items-center justify-center w-full px-4 py-8 border-2 border-dashed border-gray-300 rounded-lg hover:border-blue-500 cursor-pointer transition-colors"
                     >
-                      {submitting ? (
-                        <>
-                          <Loader className="w-5 h-5 animate-spin mr-2" />
-                          Starting Campaign...
-                        </>
-                      ) : (
-                        <>
-                          Start Campaign
-                          <ArrowRight className="w-5 h-5 ml-2" />
-                        </>
-                      )}
-                    </button>
+                      <div className="text-center">
+                        <Upload className="w-12 h-12 mx-auto text-gray-400 mb-3" />
+                        <p className="text-sm text-gray-600">
+                          {formData.csv_filename || 'Click to upload or drag and drop'}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">CSV files only (max 10MB)</p>
+                      </div>
+                    </label>
+                    
+                    {uploadProgress > 0 && uploadProgress < 100 && (
+                      <div className="mt-3">
+                        <div className="flex items-center justify-between text-sm text-gray-600 mb-1">
+                          <span>Uploading...</span>
+                          <span>{uploadProgress}%</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div 
+                            className="bg-gradient-to-r from-blue-500 to-blue-600 h-2 rounded-full transition-all duration-300"
+                            style={{ width: `${uploadProgress}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    
+                    {uploadProgress === 100 && formData.csv_file && (
+                      <div className="mt-3 flex items-center gap-2 text-green-600">
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span className="text-sm">File ready: {formData.csv_filename}</span>
+                      </div>
+                    )}
+                    
+                    {validationErrors.csv_file && (
+                      <p className="mt-1 text-sm text-red-600">{validationErrors.csv_file}</p>
+                    )}
                   </div>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Sidebar - Same as before */}
-          <div className="lg:col-span-1 space-y-6">
-            {/* Stats Grid */}
-            <div className="bg-white rounded-lg shadow-sm border p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Performance Metrics</h3>
-              <div className="grid grid-cols-2 gap-4">
-                {stats.map((stat, idx) => {
-                  const Icon = stat.icon;
-                  return (
-                    <div key={idx} className="text-center">
-                      <Icon className={`w-8 h-8 mx-auto mb-2 ${stat.color}`} />
-                      <p className="text-xl font-bold text-gray-900">{stat.value}</p>
-                      <p className="text-xs text-gray-500">{stat.label}</p>
-                    </div>
-                  );
-                })}
-              </div>
+          {/* Message Configuration */}
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <FileText className="w-6 h-6 text-purple-600" />
+              <h2 className="text-xl font-semibold text-gray-900">Message Configuration</h2>
             </div>
-
-            {/* How It Works */}
-            <div className="bg-white rounded-lg shadow-sm border p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">How It Works</h3>
-              <div className="space-y-4">
-                <div className="flex items-start">
-                  <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <span className="text-sm font-bold text-indigo-600">1</span>
-                  </div>
-                  <div className="ml-3">
-                    <p className="text-sm font-medium text-gray-900">Automatic Form Detection</p>
-                    <p className="text-xs text-gray-500">We find contact forms on each website</p>
-                  </div>
-                </div>
-                <div className="flex items-start">
-                  <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <span className="text-sm font-bold text-indigo-600">2</span>
-                  </div>
-                  <div className="ml-3">
-                    <p className="text-sm font-medium text-gray-900">Smart Field Mapping</p>
-                    <p className="text-xs text-gray-500">Your info is filled accurately</p>
-                  </div>
-                </div>
-                <div className="flex items-start">
-                  <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <span className="text-sm font-bold text-indigo-600">3</span>
-                  </div>
-                  <div className="ml-3">
-                    <p className="text-sm font-medium text-gray-900">Email Fallback</p>
-                    <p className="text-xs text-gray-500">Uses email if no form found</p>
-                  </div>
-                </div>
-                <div className="flex items-start">
-                  <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <span className="text-sm font-bold text-indigo-600">4</span>
-                  </div>
-                  <div className="ml-3">
-                    <p className="text-sm font-medium text-gray-900">Real-time Tracking</p>
-                    <p className="text-xs text-gray-500">Monitor progress on dashboard</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Important Notes */}
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-              <div className="flex items-start">
-                <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
-                <div className="ml-3">
-                  <p className="text-sm font-semibold text-amber-900">Important Notes</p>
-                  <ul className="text-xs text-amber-700 mt-2 space-y-1">
-                    <li>• Only one campaign can run at a time</li>
-                    <li>• Campaign runs until all sites are processed</li>
-                    <li>• Average processing: 120 websites/hour</li>
-                    <li>• Check dashboard for live updates</li>
-                  </ul>
-                </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Message Template *
+                </label>
+                <textarea
+                  value={formData.message_template}
+                  onChange={(e) => setFormData({...formData, message_template: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                  rows="6"
+                  placeholder="Hi {name},&#10;&#10;I wanted to reach out regarding {topic}..."
+                  required
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Use {'{'}name{'}'}, {'{'}company{'}'}, etc. for dynamic fields from your CSV
+                </p>
+                {validationErrors.message_template && (
+                  <p className="mt-1 text-sm text-red-600">{validationErrors.message_template}</p>
+                )}
               </div>
             </div>
           </div>
-        </div>
+
+          {/* Advanced Settings */}
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <Globe className="w-6 h-6 text-green-600" />
+              <h2 className="text-xl font-semibold text-gray-900">Advanced Settings</h2>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-6">
+              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                <label className="text-sm font-medium text-gray-700">
+                  Enable Proxy Rotation
+                </label>
+                <input
+                  type="checkbox"
+                  checked={formData.proxy_rotation}
+                  onChange={(e) => setFormData({...formData, proxy_rotation: e.target.checked})}
+                  className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              
+              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                <label className="text-sm font-medium text-gray-700">
+                  Enable CAPTCHA Solving
+                </label>
+                <input
+                  type="checkbox"
+                  checked={formData.captcha_solving}
+                  onChange={(e) => setFormData({...formData, captcha_solving: e.target.checked})}
+                  className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Form Actions */}
+          <div className="flex items-center justify-between bg-white rounded-xl shadow-sm p-6">
+            <button
+              type="button"
+              onClick={() => navigate('/campaigns')}
+              className="px-6 py-3 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              Cancel
+            </button>
+            
+            <button
+              type="submit"
+              disabled={isSubmitting || !!processingCampaignId}
+              className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSubmitting ? (
+                <>
+                  <Clock className="w-5 h-5 animate-spin" />
+                  {editId ? 'Updating...' : 'Starting Campaign...'}
+                </>
+              ) : processingCampaignId ? (
+                <>
+                  <Clock className="w-5 h-5 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <Send className="w-5 h-5" />
+                  {editId ? 'Update Campaign' : 'Start Campaign'}
+                </>
+              )}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

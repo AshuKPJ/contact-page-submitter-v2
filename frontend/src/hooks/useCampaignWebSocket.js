@@ -1,5 +1,5 @@
 // src/hooks/useCampaignWebSocket.js
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 
 export const useCampaignWebSocket = (campaignId) => {
   const [stats, setStats] = useState(null);
@@ -8,11 +8,13 @@ export const useCampaignWebSocket = (campaignId) => {
   useEffect(() => {
     if (!campaignId) return;
 
-    const ws = new WebSocket(`ws://localhost:8000/api/ws/campaign/${campaignId}`);
+    const ws = new WebSocket(
+      `ws://localhost:8001/api/ws/campaign/${campaignId}`
+    );
 
     ws.onopen = () => {
       setConnected(true);
-      console.log('WebSocket connected');
+      console.log("WebSocket connected");
     };
 
     ws.onmessage = (event) => {
@@ -22,7 +24,7 @@ export const useCampaignWebSocket = (campaignId) => {
 
     ws.onclose = () => {
       setConnected(false);
-      console.log('WebSocket disconnected');
+      console.log("WebSocket disconnected");
     };
 
     return () => {

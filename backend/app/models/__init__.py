@@ -1,53 +1,42 @@
 # app/models/__init__.py
+"""
+Database models initialization - proper import order to avoid circular dependencies.
+"""
 
-# Core models
-from .user_profile import UserProfile  # both exist
-from .user import User, UserRole
-from .subscription_plan import SubscriptionPlan
-from .website import Website
-from .submission import Submission, SubmissionStatus
-from .submission_log import SubmissionLog
-from .settings_and_logs import SystemLog, Settings, Log
+# Import Base first
+from app.core.database import Base
 
-# Optional modules: import only if present
-try:
-    from .campaign import Campaign, CampaignStatus  # keep if you have campaign.py
+# Import models without dependencies first
+from app.models.subscription import SubscriptionPlan, Subscription
+from app.models.settings import Settings
+from app.models.user_profile import UserProfile
 
-    HAS_CAMPAIGN = True
-except Exception:
-    HAS_CAMPAIGN = False
+# Import logs before User (User references logs)
+from app.models.logs import Log, SubmissionLog, CaptchaLog, SystemLog
 
-try:
-    from .captcha_log import CaptchaLog  # keep if you have captcha_log.py
+# Now import User (after its dependencies)
+from app.models.user import User
 
-    HAS_CAPTCHA_LOG = True
-except Exception:
-    HAS_CAPTCHA_LOG = False
+# Import models that depend on User
+from app.models.campaign import Campaign, CampaignStatus
+from app.models.website import Website
+from app.models.submission import Submission, SubmissionStatus
 
-try:
-    from .subscription import Subscription  # exists in your tree
-
-    HAS_SUBSCRIPTION = True
-except Exception:
-    HAS_SUBSCRIPTION = False
-
+# Export all for easy access
 __all__ = [
+    "Base",
     "User",
-    "UserRole",
-    "UserProfile",
+    "Campaign",
+    "CampaignStatus",
     "Submission",
     "SubmissionStatus",
-    "SubmissionLog",
-    "SystemLog",
+    "Website",
+    "UserProfile",
+    "SubscriptionPlan",
+    "Subscription",
     "Settings",
     "Log",
-    "Website",
-    "SubscriptionPlan",
+    "SubmissionLog",
+    "CaptchaLog",
+    "SystemLog",
 ]
-
-if HAS_SUBSCRIPTION:
-    __all__.append("Subscription")
-if HAS_CAMPAIGN:
-    __all__ += ["Campaign", "CampaignStatus"]
-if HAS_CAPTCHA_LOG:
-    __all__.append("CaptchaLog")

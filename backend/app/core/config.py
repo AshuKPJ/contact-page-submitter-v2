@@ -1,157 +1,178 @@
 # app/core/config.py
+from __future__ import annotations
 
 import os
-from typing import List, Optional
-from pydantic_settings import BaseSettings
-from pydantic import Field
+from functools import lru_cache
+from typing import Optional, Dict, Any, List, Literal, Union
+from dataclasses import dataclass, field
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 
-class Settings(BaseSettings):
-    # App Configuration
-    APP_NAME: str = Field(default="Contact Page Submitter API", env="APP_NAME")
-    VERSION: str = Field(default="1.0.0", env="VERSION")
-    APP_VERSION: str = Field(default="1.0.0", env="APP_VERSION")  # Added from your .env
-    DEBUG: bool = Field(default=False, env="DEBUG")
-    ENVIRONMENT: str = Field(default="development", env="ENVIRONMENT")
+@dataclass
+class BrowserSettings:
+    """Browser configuration settings - single source of truth"""
 
-    # Security Configuration
-    SECRET_KEY: str = Field(..., env="SECRET_KEY")
-    ALGORITHM: str = Field(default="HS256", env="ALGORITHM")
-    JWT_ALGORITHM: str = Field(
-        default="HS256", env="JWT_ALGORITHM"
-    )  # Added from your .env
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
-        default=30, env="ACCESS_TOKEN_EXPIRE_MINUTES"
-    )
-    JWT_EXPIRATION_HOURS: int = Field(
-        default=24, env="JWT_EXPIRATION_HOURS"
-    )  # Added from your .env
+    @property
+    def headless(self) -> bool:
+        """Determine if browser should run headless based on environment"""
+        # DEV_AUTOMATION_HEADFUL takes precedence
+        if os.getenv("DEV_AUTOMATION_HEADFUL"):
+            return not (os.getenv("DEV_AUTOMATION_HEADFUL", "false").lower() == "true")
+        # Fallback to BROWSER_HEADLESS
+        return os.getenv("BROWSER_HEADLESS", "true").lower() == "true"
 
-    # Database Configuration
-    DATABASE_URL: str = Field(..., env="DATABASE_URL")
-
-    # CORS Configuration
-    CORS_ORIGINS: List[str] = Field(
-        default=[
-            "http://localhost:3000",
-            "http://localhost:5173",
-            "http://127.0.0.1:3000",
-            "http://127.0.0.1:5173",
-        ],
-        env="CORS_ORIGINS",
-    )
-
-    # Browser Configuration
-    BROWSER_HEADLESS: bool = Field(default=True, env="BROWSER_HEADLESS")
-    BROWSER_SLOW_MO: int = Field(default=100, env="BROWSER_SLOW_MO")
-
-    # Captcha Configuration - Added from your .env
-    CAPTCHA_ENCRYPTION_KEY: str = Field(default="", env="CAPTCHA_ENCRYPTION_KEY")
-    CAPTCHA_DBC_API_URL: str = Field(
-        default="http://api.dbcapi.me/api", env="CAPTCHA_DBC_API_URL"
-    )
-    CAPTCHA_SOLVE_TIMEOUT: int = Field(default=120, env="CAPTCHA_SOLVE_TIMEOUT")
-
-    # Rate Limiting - Added from your .env
-    RATE_LIMIT_PER_MINUTE: int = Field(default=60, env="RATE_LIMIT_PER_MINUTE")
-    SUBMISSION_DELAY_SECONDS: int = Field(default=3, env="SUBMISSION_DELAY_SECONDS")
-
-    # Logging Configuration
-    LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
-    LOG_FORMAT: str = Field(
-        default="%(asctime)s - %(name)s - %(levelname)s - %(message)s", env="LOG_FORMAT"
-    )
-    LOG_FILE: str = Field(default="cps.log", env="LOG_FILE")  # Added from your .env
-
-    # Redis Configuration (if needed)
-    REDIS_URL: Optional[str] = Field(default=None, env="REDIS_URL")
-
-    # Email Configuration - Updated with your .env variables
-    SMTP_HOST: Optional[str] = Field(default=None, env="SMTP_HOST")
-    SMTP_PORT: Optional[int] = Field(default=587, env="SMTP_PORT")
-    SMTP_USERNAME: Optional[str] = Field(default=None, env="SMTP_USERNAME")
-    SMTP_PASSWORD: Optional[str] = Field(default=None, env="SMTP_PASSWORD")
-    SMTP_USER: str = Field(
-        default="your-email@gmail.com", env="SMTP_USER"
-    )  # Added from your .env
-    SMTP_FROM_EMAIL: str = Field(
-        default="noreply@cps-platform.com", env="SMTP_FROM_EMAIL"
-    )  # Added from your .env
-
-    # File Upload Configuration - Updated with your .env variables
-    MAX_FILE_SIZE: int = Field(default=10 * 1024 * 1024, env="MAX_FILE_SIZE")  # 10MB
-    UPLOAD_DIRECTORY: str = Field(default="uploads", env="UPLOAD_DIRECTORY")
-    MAX_CSV_SIZE_MB: int = Field(
-        default=50, env="MAX_CSV_SIZE_MB"
-    )  # Added from your .env
-    ALLOWED_FILE_EXTENSIONS: str = Field(
-        default=".csv,.txt", env="ALLOWED_FILE_EXTENSIONS"
-    )  # Added from your .env
-    UPLOAD_FOLDER: str = Field(
-        default="./uploads", env="UPLOAD_FOLDER"
-    )  # Added from your .env
-
-    # Submission Configuration - Added from your .env
-    MAX_CONCURRENT_SUBMISSIONS: int = Field(default=5, env="MAX_CONCURRENT_SUBMISSIONS")
-    FORM_TIMEOUT_SECONDS: int = Field(default=30, env="FORM_TIMEOUT_SECONDS")
-    EMAIL_EXTRACTION_TIMEOUT: int = Field(default=15, env="EMAIL_EXTRACTION_TIMEOUT")
-    MAX_RETRIES_PER_URL: int = Field(default=2, env="MAX_RETRIES_PER_URL")
-    MIN_DELAY_BETWEEN_REQUESTS: float = Field(
-        default=1.5, env="MIN_DELAY_BETWEEN_REQUESTS"
-    )
-    MAX_DELAY_BETWEEN_REQUESTS: float = Field(
-        default=5.0, env="MAX_DELAY_BETWEEN_REQUESTS"
-    )
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
-        # Allow extra fields to prevent validation errors
-        extra = "ignore"  # This will ignore any extra environment variables
-
-    def validate_configuration(self):
-        """Validate critical configuration settings"""
-        errors = []
-
-        if not self.SECRET_KEY:
-            errors.append("SECRET_KEY is required")
-
-        if not self.DATABASE_URL:
-            errors.append("DATABASE_URL is required")
-
-        if len(self.SECRET_KEY) < 32:
-            errors.append("SECRET_KEY should be at least 32 characters long")
-
-        if errors:
-            raise ValueError(f"Configuration errors: {', '.join(errors)}")
-
-        print(
-            f"[CONFIG] Configuration validated successfully for {self.ENVIRONMENT} environment"
+    @property
+    def slow_mo(self) -> int:
+        """Get slow motion delay in milliseconds"""
+        # Try DEV_AUTOMATION_SLOWMO_MS first, then BROWSER_SLOW_MO_MS
+        return int(
+            os.getenv("DEV_AUTOMATION_SLOWMO_MS", os.getenv("BROWSER_SLOW_MO_MS", "0"))
         )
-        print(f"[CONFIG] CORS origins: {self.CORS_ORIGINS}")
-        print(f"[CONFIG] Database URL: {self.DATABASE_URL}")
-        print(f"[CONFIG] Browser headless: {self.BROWSER_HEADLESS}")
-        print(f"[CONFIG] Browser slow_mo: {self.BROWSER_SLOW_MO}ms")
 
-        return True
+    viewport_width: int = 1920
+    viewport_height: int = 1080
+    page_load_timeout: int = 30000
+
+    @property
+    def is_visible(self) -> bool:
+        """Helper to check if browser will be visible"""
+        return not self.headless
+
+    def log_settings(self) -> dict:
+        """Return current settings for logging"""
+        return {
+            "headless": self.headless,
+            "visible": self.is_visible,
+            "slow_mo_ms": self.slow_mo,
+            "viewport": f"{self.viewport_width}x{self.viewport_height}",
+            "timeout_ms": self.page_load_timeout,
+        }
 
 
-# Singleton instance
-_settings: Optional[Settings] = None
+@dataclass
+class Settings:
+    """Application settings using dataclass for simplicity"""
+
+    # Application
+    APP_NAME: str = field(
+        default_factory=lambda: os.getenv("APP_NAME", "Contact Page Submitter")
+    )
+    VERSION: str = field(default_factory=lambda: os.getenv("APP_VERSION", "2.0.0"))
+    DEBUG: bool = field(
+        default_factory=lambda: os.getenv("DEBUG", "False").lower() == "true"
+    )
+    PORT: int = field(default_factory=lambda: int(os.getenv("PORT", "8001")))
+
+    # Database
+    DATABASE_URL: str = field(
+        default_factory=lambda: os.getenv(
+            "DATABASE_URL", "postgresql://user:password@localhost/cps_db"
+        )
+    )
+
+    # Security
+    SECRET_KEY: str = field(
+        default_factory=lambda: os.getenv(
+            "SECRET_KEY", "your-secret-key-change-in-production"
+        )
+    )
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = field(
+        default_factory=lambda: int(os.getenv("JWT_EXPIRATION_HOURS", "24")) * 60
+    )
+
+    # CORS
+    CORS_ORIGINS: List[str] = field(
+        default_factory=lambda: [
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "http://localhost:8001",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:3000",
+        ]
+    )
+
+    # Browser settings - using property-based class
+    browser: BrowserSettings = field(default_factory=BrowserSettings)
+
+    # Email settings
+    SMTP_HOST: Optional[str] = field(default_factory=lambda: os.getenv("SMTP_HOST"))
+    SMTP_PORT: int = field(default_factory=lambda: int(os.getenv("SMTP_PORT", "587")))
+    SMTP_USER: Optional[str] = field(default_factory=lambda: os.getenv("SMTP_USER"))
+    SMTP_PASSWORD: Optional[str] = field(
+        default_factory=lambda: os.getenv("SMTP_PASSWORD")
+    )
+    FROM_EMAIL: Optional[str] = field(default_factory=lambda: os.getenv("FROM_EMAIL"))
+
+    # Captcha settings
+    CAPTCHA_ENCRYPTION_KEY: str = field(
+        default_factory=lambda: os.getenv(
+            "CAPTCHA_ENCRYPTION_KEY", "_SS_cW5eZXsJJwQBDoczH8Ujsptjo_s0G_w6QPhnaw8="
+        )
+    )
+    CAPTCHA_DBC_API_URL: str = field(
+        default_factory=lambda: os.getenv(
+            "CAPTCHA_DBC_API_URL", "http://api.dbcapi.me/api"
+        )
+    )
+    CAPTCHA_SOLVE_TIMEOUT: int = field(
+        default_factory=lambda: int(os.getenv("CAPTCHA_SOLVE_TIMEOUT", "120"))
+    )
+
+    # Worker settings
+    WORKER_CONCURRENCY: int = field(
+        default_factory=lambda: int(os.getenv("MAX_CONCURRENT_SUBMISSIONS", "5"))
+    )
+    SUBMISSION_DELAY: float = field(
+        default_factory=lambda: float(os.getenv("SUBMISSION_DELAY_SECONDS", "3.0"))
+    )
+
+    # Rate limiting
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_PER_MINUTE: int = field(
+        default_factory=lambda: int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
+    )
+
+    # Logging
+    LOG_LEVEL: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
+    LOG_FILE: Optional[str] = field(default_factory=lambda: os.getenv("LOG_FILE"))
+
+    # Form processing
+    FORM_TIMEOUT_SECONDS: int = field(
+        default_factory=lambda: int(os.getenv("FORM_TIMEOUT_SECONDS", "30"))
+    )
+    EMAIL_EXTRACTION_TIMEOUT: int = field(
+        default_factory=lambda: int(os.getenv("EMAIL_EXTRACTION_TIMEOUT", "15"))
+    )
+
+    # Feature flags
+    FEATURE_USE_BROWSER: bool = field(
+        default_factory=lambda: os.getenv("FEATURE_USE_BROWSER", "true").lower()
+        == "true"
+    )
+    FEATURE_CAPTCHA_SOLVING: bool = field(
+        default_factory=lambda: os.getenv("FEATURE_CAPTCHA_SOLVING", "true").lower()
+        == "true"
+    )
+    FEATURE_EMAIL_FALLBACK: bool = field(
+        default_factory=lambda: os.getenv("FEATURE_EMAIL_FALLBACK", "true").lower()
+        == "true"
+    )
 
 
+@lru_cache()
 def get_settings() -> Settings:
-    """Get settings instance (singleton pattern)"""
-    global _settings
-    if _settings is None:
-        _settings = Settings()
-        _settings.validate_configuration()
-    return _settings
+    """Get cached settings instance"""
+    settings = Settings()
 
+    # Log browser configuration on first load
+    import logging
 
-# IMPORTANT: For backward compatibility with existing imports
-# This allows both patterns to work:
-# - from app.core.config import settings
-# - from app.core.config import get_settings
-settings = get_settings()
+    logger = logging.getLogger(__name__)
+    browser_config = settings.browser.log_settings()
+    logger.info(f"Browser Configuration: {browser_config}")
+
+    return settings
